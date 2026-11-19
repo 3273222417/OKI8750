@@ -13,6 +13,22 @@
 - 绿厂官方摆烂，代码开源开一半，导致部分内核代码无法通过已有的配置xml正常编译，甚至没有编译配置xml；
 - 官方使用的 Bazel 编译器过于不稳定且低效，容易出现各种各样莫名其妙的错误，且全网几乎找不到任何有效解决方法，对于新手极不友好；
 - 由于绿厂魔改内核f2fs代码，导致欧加真机型刷入GKI内核后不清空data分区就无法正常开机。
+## 构建 6.6.89 SukiSU-Nova
+
+在 GitHub Actions 中打开 [6.6.89 欧加真OKI内核快速构建](https://github.com/3273222417/OKI8750/actions/workflows/fastbuild_6.6.89.yml)，选择包含修复的分支，按下表运行。该流程面向 SM8750（非天玑），不是仅测试打包的「发布打包测试」。从非默认分支运行只上传工件，不创建 Release。
+
+| 输入 | 值 |
+| --- | --- |
+| `ksu_type` | `sukisu`（SukiSU-Nova） |
+| `susfs_enable`、`lz4_enable`、`better_net` | `true` |
+| `adios_enable`、`rekernel_enable` | `true` |
+| `baseband_guard` | `false` |
+| 其他选项 | 保持默认 |
+
+`sukisu` 从 [SukiSU-Nova 官方仓库](https://github.com/SukiSU-Nova/SukiSU-Nova)检出 [固定提交](scripts/sukisu_sources.env)：启用 SUSFS 时使用 `builtin`，未启用时使用 `main`。`bakasu` 仍独立使用 BakaSU。Nova 构建先安装 UAPI 头文件，再编译其 preinit runner 和内核。本地 Linux 可运行 `bash local/builder_6.6.89.sh`，在 KSU 分支提示中选 `y`。
+
+成功运行的 **Artifacts** 包含 `AnyKernel3_SukiSU-Nova_*.zip`；`oki-6.6.89-nova-build-evidence` 保留实际内核配置、源码版本、编译日志和 SHA-256。编译成功不等于已经在真机验证；刷入前确认机型、系统版本并备份原始启动镜像。
+
 ## 本项目的主要内容(及计划)
 - 提供 OKI（官方源码）/ GKI（谷歌通用内核源码）双编译模式，OKI保留官方驱动/调度，GKI兼容性更强（无需相同内核小版本即可刷入）；
 - 为 GKI 移植官方内核的f2fs源码，使 GKI 内核可以和官方 OKI 内核一样，刷入后可保留数据正常开机，不需要清空data ~~（新建文件夹）~~；
@@ -23,7 +39,7 @@
 - [x] 欧加真 SM8750 通用OKI内核（基于一加13源码的 6.6.30, 一加13t源码的 6.6.56, 一加Pad2Pro源码的 6.6.57, 一加13源码的 6.6.66 及一加13源码的 6.6.89，其他同内核版本非SM8750机型可自行测试，部分机型可完全兼容）
 - [x] 欧加真 MT6991 通用OKI内核（基于一加Ace5至尊版源码的 6.6.50 官方内核源码，其他同内核版本非MT6989机型可自行测试，部分机型可完全兼容）
 - [x] 欧加真 6.6 系列内核全面移植官方风驰scx调速器，在有官方风驰内核支持的机型上可实现完整原版风驰内核调度功能
-- [x] ReSukiSU/SukiSU Ultra/KernelSU Next/原版KernelSU多版本KSU可选
+- [x] BakaSU / SukiSU-Nova / KernelSU Next / 原版 KernelSU 可选
 - [x] 引入独家设计的 [ccache-ECS](https://github.com/cctv18/ccache-ECS) 缓存及大量编译流程优化，编译时间可稳定在约6min *(首次编译时会拉取公共预置ccache，从第二次开始没有大量配置改动的情况下，单次编译时间约6min；距离上一次调用两周未调用后缓存会被自动清除，此时编译会自动重建缓存)*
 - [x] 引入O2编译优化，改善内核运行性能
 - [x] ~~可选manual/kprobes/syscall钩子模式(kprobes钩子模式下支持切换至sus su模式)~~ 由于最新版KSU已更新inline hook，故旧版manual/syscall钩子已作废
@@ -46,7 +62,7 @@
 ##### 
 ## 鸣谢
 - ReSukiSU：[ReSukiSU/ReSukiSU](https://github.com/ReSukiSU/ReSukiSU)
-- SukiSU Ultra：[SukiSU-Ultra/SukiSU-Ultra](https://github.com/SukiSU-Ultra/SukiSU-Ultra)
+- SukiSU-Nova：[SukiSU-Nova/SukiSU-Nova](https://github.com/SukiSU-Nova/SukiSU-Nova)
 - susfs4ksu：[ShirkNeko/susfs4ksu](https://github.com/ShirkNeko/susfs4ksu)
 - SukiSU内核补丁：[SukiSU-Ultra/SukiSU_patch](https://github.com/SukiSU-Ultra/SukiSU_patch)
 - pershoot维护的KernelSU Next分支：[pershoot/KernelSU-Next](https://github.com/pershoot/KernelSU-Next)

@@ -6,13 +6,15 @@ env:
   KERNEL_VERSION: '6.6'
   SUB_VERSION: '89'
   KERNEL_NAME: 'android15-8-g29d86c5fc9dd-abogki428889875-4k'
+  OKI_COMMIT: '1fa251814f74c86488de8c765ea24375dfbfc094'
   CCACHE_KEY: ccache-ecsv4-6.6.89
+  KERNEL_SUFFIX_INPUT: ${{ inputs.kernel_suffix }}
 
 on:
   workflow_dispatch:
     inputs:
       ksu_type:
-        description: 'KernelSU分支(BakaSU/SukiSU Ultra/KernelSU Next/KSU(原版)/无内置KSU,默认BakaSU)'
+        description: 'KernelSU分支(BakaSU/SukiSU-Nova/KernelSU Next/KSU(原版)/无内置KSU,默认BakaSU)'
         required: true
         type: choice
         default: 'bakasu'
@@ -99,55 +101,46 @@ on:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    timeout-minutes: 90
     outputs:
       ksuver: ${{ steps.ksu_version.outputs.ksuver }}
       ak3name: ${{ steps.create_zip.outputs.ak3name }}
+      full_version: ${{ steps.create_zip.outputs.full_version }}
     permissions:
       actions: write
       contents: read
     steps:
+      - name: 检出构建脚本
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
       - name: 安装环境依赖+初始化源码仓库及llvm-Clang18工具链
         run: |
-          rm -rf kernel_workspace
+          set -euo pipefail
           mkdir kernel_workspace
           cd kernel_workspace
-          echo "当前仓库：$GITHUB_REPOSITORY"
-          echo "当前分支：$GITHUB_REF_NAME"
-          
-          sudo apt-mark hold firefox &&
-          sudo apt-mark hold libc-bin &&
-          sudo apt purge man-db &&
-          sudo rm -rf /var/lib/man-db/auto-update &&
-          sudo apt update &&
-          sudo apt-get install -y --no-install-recommends binutils python-is-python3 libssl-dev libelf-dev &
-          #旧版完整指令：（由于经过验证大部分指令已内置于GitHub Action环境中，故进行精简）
-          #sudo apt-get install -y --no-install-recommends curl bison flex make binutils git perl gcc python3 python-is-python3 bc libssl-dev libelf-dev zip unzip ccache
-          
-          #使用最新版ccache-ECS（特化优化内核编译缓存，大幅提升二次不同配置编译速度）
-          wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/lib/ccache-x86-64 -O ccache &&
-          sudo cp -f ./ccache /usr/bin/ccache &&
-          sudo chmod +x /usr/bin/ccache &&
-          rm -f ./ccache &
-          
-          echo "正在克隆源码仓库..."
-          aria2c -s16 -x16 -k1M https://github.com/cctv18/android_kernel_common_oneplus_sm8750/archive/refs/heads/oneplus/sm8750_v_16.0.0_oneplus_13_6.6.89.zip -o common.zip && 
-          unzip -q common.zip && 
-          mv "android_kernel_common_oneplus_sm8750-oneplus-sm8750_v_16.0.0_oneplus_13_6.6.89" common &&
-          rm -rf common.zip &
-          
-          echo "正在克隆llvm-clang18工具链..." &&
-          mkdir -p clang18 &&
-          aria2c -s16 -x16 -k1M https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/LLVM-Clang18-r510928/clang-r510928.zip -o clang.zip &&
-          unzip -q clang.zip -d clang18 &&
-          rm -rf clang.zip &
-          
-          echo "正在克隆构建工具..." &&
-          aria2c -s16 -x16 -k1M https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/LLVM-Clang18-r510928/build-tools.zip -o build-tools.zip &&
-          unzip -q build-tools.zip &&
-          rm -rf build-tools.zip &
-          
-          wait
-          echo "所有源码及llvm-Clang18工具链初始化完成！"
+          (sudo apt-get update -q && sudo apt-get install -y --no-install-recommends \
+            bc bison flex binutils python-is-python3 libssl-dev libelf-dev rsync) &
+          apt_pid=$!
+          (curl -fLsS --retry 3 --connect-timeout 30 -o common.zip \
+             "https://codeload.github.com/cctv18/android_kernel_common_oneplus_sm8750/zip/$OKI_COMMIT" &&
+           unzip -q common.zip && mv "android_kernel_common_oneplus_sm8750-$OKI_COMMIT" common && rm -f common.zip) &
+          src_pid=$!
+          tools_url='https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/LLVM-Clang18-r510928'
+          (aria2c -s16 -x16 -k1M "$tools_url/clang-r510928.zip" -o clang.zip &&
+           unzip -q clang.zip -d clang18 && rm -f clang.zip) &
+          clang_pid=$!
+          (aria2c -s16 -x16 -k1M "$tools_url/build-tools.zip" -o build-tools.zip &&
+           unzip -q build-tools.zip && rm -f build-tools.zip) &
+          tools_pid=$!
+          for pid in "$apt_pid" "$src_pid" "$clang_pid" "$tools_pid"; do
+            wait "$pid"
+          done
+          if [[ "${{ inputs.ksu_type }}" != "sukisu" ]]; then
+            sudo install -m 0755 "$GITHUB_WORKSPACE/lib/ccache-x86-64" /usr/bin/ccache
+          fi
+          echo "OKI source: $OKI_COMMIT"
           echo "正在去除 ABI 保护 & 去除 dirty 后缀..."
           rm common/android/abi_gki_protected_exports_* || true
           for f in common/scripts/setlocalversion; do
@@ -156,6 +149,7 @@ jobs:
           done
 
       - name: 配置ccache目录
+        if: inputs.ksu_type != 'sukisu'
         run: |
           echo "CCACHE_DIR=$HOME/.ccache_${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }}" >> $GITHUB_ENV
           echo "CCACHE_MAXSIZE=3G" >> $GITHUB_ENV
@@ -170,6 +164,7 @@ jobs:
           echo "CCACHE_REAL_KEY=$CCACHE_REAL_KEY" >> $GITHUB_ENV
 
       - name: 载入当前版本内核的 ccache缓存
+        if: inputs.ksu_type != 'sukisu'
         uses: actions/cache@v5
         id: ccache-restore
         with:
@@ -180,6 +175,7 @@ jobs:
             ${{ env.CCACHE_REAL_KEY }}-
 
       - name: 拉取公共预置 ccache 缓存
+        if: inputs.ksu_type != 'sukisu'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -206,7 +202,7 @@ jobs:
           fi
 
       - name: 清除旧 ccache 缓存
-        if: inputs.ccache_update
+        if: inputs.ksu_type != 'sukisu' && inputs.ccache_update
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -218,6 +214,7 @@ jobs:
           fi
       
       - name: 初始化并配置ccache
+        if: inputs.ksu_type != 'sukisu'
         run: |
           # 设置ccache环境变量
           export CCACHE_COMPILERCHECK="none"
@@ -250,8 +247,10 @@ jobs:
         run: |
           # 进入内核工作目录
           cd kernel_workspace
-          if [[ ${{ github.event.inputs.ksu_type }} == "sukisu" || ${{ github.event.inputs.ksu_type }} == "bakasu" ]]; then
-            echo "正在配置BakaSU（由于SukiSU长期未维护无法正常编译，且BakaSU兼容sukisu管理器，故SukiSU源码仓库已重定向为bakasu）..."
+          if [[ "${{ inputs.ksu_type }}" == "sukisu" ]]; then
+            bash "$GITHUB_WORKSPACE/scripts/setup_sukisu.sh" "$PWD" "${{ inputs.susfs_enable }}"
+          elif [[ "${{ inputs.ksu_type }}" == "bakasu" ]]; then
+            echo "正在配置BakaSU..."
             curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/refs/heads/main/kernel/setup.sh" | bash -s main
             echo 'CONFIG_KSU_FULL_NAME_FORMAT="%TAG_NAME%-%COMMIT_SHA%@cctv18"' >> ./common/arch/arm64/configs/gki_defconfig
             cd ./KernelSU
@@ -291,6 +290,10 @@ jobs:
         if: inputs.susfs_enable
         run: |
           cd kernel_workspace
+          if [[ "${{ inputs.ksu_type }}" == "sukisu" ]]; then
+            bash "$GITHUB_WORKSPACE/scripts/apply_sukisu_susfs.sh" "$PWD"
+            exit 0
+          fi
           if [[ ${{ github.event.inputs.ksu_type }} != "none" ]]; then
             echo "正在添加susfs补丁..."
             git clone --depth=1 https://github.com/cctv18/susfs4oki.git susfs4ksu -b oki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}
@@ -315,15 +318,7 @@ jobs:
       - name: 应用lz4 1.10.0 & zstd 1.5.7补丁
         if: inputs.lz4_enable
         run: |
-          echo "正在添加lz4 1.10.0 & zstd 1.5.7补丁…"
-          cd kernel_workspace
-          git clone --depth=1 https://github.com/$GITHUB_REPOSITORY.git -b $GITHUB_REF_NAME $GITHUB_ACTOR
-          cp ./$GITHUB_ACTOR/zram_patch/001-lz4.patch ./common/
-          cp ./$GITHUB_ACTOR/zram_patch/lz4armv8.S ./common/lib
-          cp ./$GITHUB_ACTOR/zram_patch/002-zstd.patch ./common/
-          cd ./common
-          git apply -p1 < 001-lz4.patch || true
-          patch -p1 -F 3 < 002-zstd.patch || true
+          bash "$GITHUB_WORKSPACE/scripts/apply_compression_6.6.89.sh" kernel_workspace/common
 
       - name: 应用 lz4kd 补丁
         if: inputs.lz4kd_enable
@@ -381,12 +376,15 @@ jobs:
           echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y" >> ./common/arch/arm64/configs/gki_defconfig
           #禁用 defconfig 检查
           sed -i 's/check_defconfig//' ./common/build.config.gki
-          #跳过将uapi标准头安装到 usr/include 目录的不必要操作，节省编译时间
-          echo "CONFIG_HEADERS_INSTALL=n" >> ./common/arch/arm64/configs/gki_defconfig
+          # Nova preinit runner 必须先安装 UAPI 头；其他分支保留原有优化。
+          if [[ "${{ inputs.ksu_type }}" == "sukisu" ]]; then
+            echo "CONFIG_HEADERS_INSTALL=y" >> ./common/arch/arm64/configs/gki_defconfig
+          else
+            echo "CONFIG_HEADERS_INSTALL=n" >> ./common/arch/arm64/configs/gki_defconfig
+          fi
           # 应用 CVE_2026_43499 修复补丁
           cd common
-          wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/other_patch/cve-2026-43499-rtmutex-6.6.patch
-          patch -p1 -F 3 < cve-2026-43499-rtmutex-6.6.patch
+          patch --batch --forward -p1 -F 3 < "$GITHUB_WORKSPACE/other_patch/cve-2026-43499-rtmutex-6.6.patch"
           
       - name: 启用网络功能增强优化配置
         if: inputs.better_net
@@ -421,8 +419,7 @@ jobs:
           echo "CONFIG_IP6_NF_TARGET_MASQUERADE=y" >> ./common/arch/arm64/configs/gki_defconfig
           #由于部分机型的vintf兼容性检测规则，在开启CONFIG_IP6_NF_NAT后开机会出现"您的设备内部出现了问题。请联系您的设备制造商了解详情。"的提示，故添加一个配置修复补丁，在编译内核时隐藏CONFIG_IP6_NF_NAT=y但不影响对应功能编译
           cd common
-          wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/other_patch/config.patch
-          patch -p1 -F 3 < config.patch || true
+          patch --batch --forward -p1 -F 3 < "$GITHUB_WORKSPACE/other_patch/config.patch"
 
       - name: 添加 BBR 等一系列拥塞控制算法
         run: |
@@ -540,109 +537,89 @@ jobs:
       - name: 添加制作名称
         run: |
           cd kernel_workspace
-          echo "替换内核版本后缀..."
-          if [[ -n "${{ github.event.inputs.kernel_suffix }}" ]]; then
-            echo "当前内核版本后缀：${{ github.event.inputs.kernel_suffix }}"
-            for f in ./common/scripts/setlocalversion; do
-              sed -i "\$s|echo \"\\\$res\"|echo \"-${{ github.event.inputs.kernel_suffix }}\"|" "$f"
-            done
-            sudo sed -i 's/-4k/-${{ github.event.inputs.KERNEL_SUFFIX }}/g' ./common/arch/arm64/configs/gki_defconfig
-          else
-            echo "当前内核版本后缀：${{ env.KERNEL_NAME }}"
-            for f in ./common/scripts/setlocalversion; do
-              sed -i "\$s|echo \"\\\$res\"|echo \"-${{ env.KERNEL_NAME }}\"|" "$f"
-            done
-            sudo sed -i 's/-4k/-${{ env.KERNEL_NAME }}/g' ./common/arch/arm64/configs/gki_defconfig
+          suffix="${KERNEL_SUFFIX_INPUT:-$KERNEL_NAME}"
+          if [[ ! "$suffix" =~ ^[a-zA-Z0-9][a-zA-Z0-9._+-]{0,127}$ ]]; then
+            echo '::error::无效的内核后缀：仅允许字母、数字、点、下划线、加号和连字符，须以字母或数字开头'
+            exit 1
           fi
+          echo "KERNEL_BUILD_SUFFIX=$suffix" >> "$GITHUB_ENV"
+          sed -i "\$s|echo \"\\\$res\"|echo \"-$suffix\"|" ./common/scripts/setlocalversion
+          sed -i "s/-4k/-$suffix/g" ./common/arch/arm64/configs/gki_defconfig
           sed -i 's/${scm_version}//' ./common/scripts/setlocalversion
           echo "CONFIG_LOCALVERSION_AUTO=n" >> ./common/arch/arm64/configs/gki_defconfig
            
       - name: 构建内核
+        env:
+          BETTER_NET: ${{ inputs.better_net }}
+          ADIOS_ENABLE: ${{ inputs.adios_enable }}
+          REKERNEL_ENABLE: ${{ inputs.rekernel_enable }}
+          BASEBAND_GUARD: ${{ inputs.baseband_guard }}
         run: |
+          set -eo pipefail
           WORKDIR="$(pwd)"
-          export PATH="/usr/lib/ccache:$PATH"
-          export PATH="$WORKDIR/kernel_workspace/clang18/bin:$PATH"
           export PATH="$WORKDIR/kernel_workspace/build-tools/bin:$PATH"
-          CLANG_DIR="$WORKDIR/kernel_workspace/clang18/bin"
-          CLANG_VERSION="$($CLANG_DIR/clang --version | head -n 1)"
-          LLD_VERSION="$($CLANG_DIR/ld.lld --version | head -n 1)"
-          echo "编译器信息:"
-          echo "Clang版本: $CLANG_VERSION"
-          echo "LLD版本: $LLD_VERSION"
-          pahole_version=$(pahole --version 2>/dev/null | head -n1); [ -z "$pahole_version" ] && echo "pahole版本：未安装" || echo "pahole版本：$pahole_version"
-          
-          export CCACHE_LOGFILE="${{ github.workspace }}/kernel_workspace/ccache.log"
-          export CCACHE_COMPILERCHECK="none"
-          export CCACHE_BASEDIR="${{ github.workspace }}"
-          export CCACHE_NOHASHDIR="true"
-          export CCACHE_NOHARDLINK="true"
-          export CCACHE_DIR="${{ env.CCACHE_DIR }}"
-          export CCACHE_MAXSIZE="3G"
-          export CCACHE_IS_KERNEL_COMPILING="true"
-          echo "sloppiness = file_stat_matches,include_file_ctime,include_file_mtime,pch_defines,file_macro,time_macros" >> "$CCACHE_DIR/ccache.conf"
-          
+          export PATH="$WORKDIR/kernel_workspace/clang18/bin:$PATH"
+          clang --version
+          ld.lld --version
           cd kernel_workspace/common
-          wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/lib/libfakestat.so
-          wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/lib/libfaketimeMT.so
-          chmod 777 ./*.so
-          export FAKESTAT="2025-05-25 12:00:00"
-          export FAKETIME="@2025-05-25 13:00:00"
-          echo "FAKESTAT=$FAKESTAT" >> $GITHUB_ENV
-          echo "FAKETIME=$FAKETIME" >> $GITHUB_ENV
-          SO_DIR=$(pwd)
-          export PRELOAD_LIBS="$SO_DIR/libfakestat.so $SO_DIR/libfaketimeMT.so"
-          #创建 CC (编译器) 包装器
-          echo '#!/bin/bash' > cc-wrapper
-          echo 'export LD_PRELOAD="'$PRELOAD_LIBS'"' >> cc-wrapper
-          echo 'export FAKESTAT="'$FAKESTAT'"' >> cc-wrapper
-          echo 'export FAKETIME="'$FAKETIME'"' >> cc-wrapper
-          echo 'ccache clang "$@"' >> cc-wrapper
-          #创建 LD (链接器) 包装器
-          echo '#!/bin/bash' > ld-wrapper
-          echo 'export LD_PRELOAD="'$PRELOAD_LIBS'"' >> ld-wrapper
-          echo 'export FAKESTAT="'$FAKESTAT'"' >> ld-wrapper
-          echo 'export FAKETIME="'$FAKETIME'"' >> ld-wrapper
-          echo 'ld.lld "$@"' >> ld-wrapper
-          
-          # 测试时间劫持测试是否正常工作
-          echo "--- [Wrapper Test] 正在创建通用的时间劫持测试脚本 ---"
-          echo '#!/bin/bash' > test-wrapper.sh
-          echo 'export LD_PRELOAD="'$PRELOAD_LIBS'"' >> test-wrapper.sh
-          echo 'export FAKESTAT="'$FAKESTAT'"' >> test-wrapper.sh
-          echo 'export FAKETIME="'$FAKETIME'"' >> test-wrapper.sh
-          echo 'echo ">>> Wrapper 内部环境检查完毕."' >> test-wrapper.sh
-          echo 'exec "$@"' >> test-wrapper.sh # 执行所有传入的参数
-          chmod +x test-wrapper.sh
-          echo "--- [Wrapper Test] 正在测试 (date) 命令 ---"
-          ./test-wrapper.sh date
-          echo "--- [Wrapper Test] 正在测试 (stat) 命令 ---"
-          ./test-wrapper.sh stat ./Makefile
-          echo "--- [Wrapper Test] 测试完毕 ---"
-          chmod +x cc-wrapper ld-wrapper
-          echo "--- 编译前环境时间: $(LD_PRELOAD=$PRELOAD_LIBS date) ---"
-          echo "--- 编译前环境文件时间戳: ---"
-          LD_PRELOAD=$PRELOAD_LIBS stat ./Makefile
-          
-          #在构建内核的同时清除不必要的.NET, Android NDK, Haskell, CodeQL运行库，清理空间且不阻塞后续步骤运行
-          sudo rm -rf /usr/share/dotnet &
-          sudo rm -rf /usr/local/lib/android &
-          sudo rm -rf /opt/ghc &
-          sudo rm -rf /opt/hostedtoolcache/CodeQL &
-          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache clang" LD="ld.lld" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error gki_defconfig &&
-          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error Image
-          
-          # 编译后时间劫持二次校验
-          echo "--- 编译后环境时间: $(LD_PRELOAD=$PRELOAD_LIBS date) ---"
-          echo "--- 编译后环境文件时间戳: ---"
-          LD_PRELOAD=$PRELOAD_LIBS stat ./Makefile
-          echo "内核编译完成！"
-          echo "ccache状态："
-          ccache -s
-          echo "编译后空间:"
-          df -h
+          mkdir -p ../build-evidence
+          cc=clang
+          ld=ld.lld
+          if [[ "${{ inputs.ksu_type }}" != "sukisu" ]]; then
+            export CCACHE_LOGFILE="$WORKDIR/kernel_workspace/ccache.log"
+            export CCACHE_COMPILERCHECK=none CCACHE_BASEDIR="$WORKDIR"
+            export CCACHE_NOHASHDIR=true CCACHE_NOHARDLINK=true CCACHE_MAXSIZE=3G CCACHE_IS_KERNEL_COMPILING=true
+            printf '%s\n' 'sloppiness = file_stat_matches,include_file_ctime,include_file_mtime,pch_defines,file_macro,time_macros' >> "$CCACHE_DIR/ccache.conf"
+            export FAKESTAT='2025-05-25 12:00:00' FAKETIME='@2025-05-25 13:00:00'
+            preload="$GITHUB_WORKSPACE/lib/libfakestat.so $GITHUB_WORKSPACE/lib/libfaketimeMT.so"
+            printf '#!/bin/bash\nexport LD_PRELOAD=%q\nexec /usr/bin/ccache clang "$@"\n' "$preload" > cc-wrapper
+            printf '#!/bin/bash\nexport LD_PRELOAD=%q\nexec ld.lld "$@"\n' "$preload" > ld-wrapper
+            chmod +x cc-wrapper ld-wrapper
+            cc="$PWD/cc-wrapper"
+            ld="$PWD/ld-wrapper"
+          fi
+          build_args=("-j$(nproc)" LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- "CC=$cc" "LD=$ld" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error)
+          make "${build_args[@]}" gki_defconfig
+          cp out/.config ../build-evidence/kernel.config
+          if [[ "${{ inputs.ksu_type }}" == "sukisu" ]]; then
+            require_y() {
+              local name
+              for name in "$@"; do
+                if ! grep -Fxq "$name=y" out/.config; then
+                  echo "::error::未能启用内核配置 $name"
+                  return 1
+                fi
+              done
+            }
+            require_y CONFIG_KSU CONFIG_HEADERS_INSTALL
+            if [[ "$BETTER_NET" == true ]]; then
+              require_y CONFIG_BPF_STREAM_PARSER CONFIG_IP_SET CONFIG_NETFILTER_XT_SET CONFIG_IP6_NF_NAT
+            fi
+            if [[ "$ADIOS_ENABLE" == true ]]; then
+              require_y CONFIG_MQ_IOSCHED_ADIOS CONFIG_MQ_IOSCHED_DEFAULT_ADIOS
+            fi
+            if [[ "$REKERNEL_ENABLE" == true ]]; then
+              require_y CONFIG_REKERNEL
+            fi
+            if [[ "$BASEBAND_GUARD" == true ]]; then
+              require_y CONFIG_BBG
+            elif grep -Eq '^CONFIG_BBG=[ym]$' out/.config; then
+              echo '::error::基带保护不应在本次构建中启用'
+              exit 1
+            fi
+            make "${build_args[@]}" headers_install
+            test -s out/usr/include/linux/unistd.h
+          fi
+          make "${build_args[@]}" Image 2>&1 | tee ../build-evidence/compile.log
+          test -s out/arch/arm64/boot/Image
+          if [[ "${{ inputs.ksu_type }}" == "sukisu" ]]; then
+            bash "$GITHUB_WORKSPACE/scripts/verify_sukisu_build.sh" "${{ inputs.susfs_enable }}"
+          else
+            /usr/bin/ccache -s
+          fi
 
       - name: 保存新的 ccache 缓存
-        if: inputs.ccache_update || steps.ccache-restore.outputs.cache-hit != 'true'
+        if: inputs.ksu_type != 'sukisu' && (inputs.ccache_update || steps.ccache-restore.outputs.cache-hit != 'true')
         uses: actions/cache/save@v5
         with:
           path: ${{ env.CCACHE_DIR }}
@@ -665,15 +642,16 @@ jobs:
         run: |
           cd kernel_workspace
           git clone https://github.com/cctv18/AnyKernel3 --depth=1
+          AK3_COMMIT="$(git -C AnyKernel3 rev-parse HEAD)"
           rm -rf ./AnyKernel3/.git
           cd AnyKernel3
           cp ../common/out/arch/arm64/boot/Image ./Image
-          if [[ ! -f ./Image ]]; then
+          if [[ ! -s ./Image ]]; then
             echo "未找到内核镜像文件，构建可能出错"
             exit 1
           fi
           if [[ ${{ github.event.inputs.ksu_type }} == "sukisu" ]]; then
-            KSU_TYPENAME="SukiSU"
+            KSU_TYPENAME="SukiSU-Nova"
           elif [[ ${{ github.event.inputs.ksu_type }} == "bakasu" ]]; then
             KSU_TYPENAME="BakaSU"
           elif [[ ${{ github.event.inputs.ksu_type }} == "ksunext" ]]; then
@@ -689,20 +667,9 @@ jobs:
           if [[ ${{ github.event.inputs.kpm_enable }} == 'true' ]]; then
             wget https://github.com/cctv18/KPatch-Next/releases/latest/download/kpn.zip
           fi
-          if [[ -n "${{ github.event.inputs.kernel_suffix }}" ]]; then
-            AK3_NAME=AnyKernel3_${KSU_TYPENAME}_${{ env.KSUVER }}_${{ env.KERNEL_VERSION }}_${{ github.event.inputs.kernel_suffix }}.zip
-          else
-            AK3_NAME=AnyKernel3_${KSU_TYPENAME}_${{ env.KSUVER }}_${{ env.KERNEL_VERSION }}_${{ env.KERNEL_NAME }}.zip
-          fi
-          zip -r ../$AK3_NAME ./*
-          echo "ak3name=$AK3_NAME" >> $GITHUB_OUTPUT
-          
-          #为AK3添加注释（调试信息）
-          if [[ -n "${{ github.event.inputs.kernel_suffix }}" ]]; then
-            FULL_VERSION=${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }}-${{ github.event.inputs.kernel_suffix }}
-          else
-            FULL_VERSION=${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }}-${{ env.KERNEL_NAME }}
-          fi
+          AK3_NAME="AnyKernel3_${KSU_TYPENAME}_${KSUVER:-}_${KERNEL_VERSION}_${KERNEL_BUILD_SUFFIX}.zip"
+          FULL_VERSION="$KERNEL_VERSION.$SUB_VERSION-$KERNEL_BUILD_SUFFIX"
+          printf 'ak3name=%s\nfull_version=%s\n' "$AK3_NAME" "$FULL_VERSION" >> "$GITHUB_OUTPUT"
           TIME_NOW="$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')"
           echo "Author: $GITHUB_ACTOR" > ./ak3.log
           echo "Repo: $GITHUB_REPOSITORY" >> ./ak3.log
@@ -723,10 +690,19 @@ jobs:
           echo "ADIOS: ${{ github.event.inputs.adios_enable }}" >> ./ak3.log
           echo "Re-Kernel: ${{ github.event.inputs.rekernel_enable }}" >> ./ak3.log
           echo "BBG: ${{ github.event.inputs.baseband_guard }}" >> ./ak3.log
-          zip -z ../$AK3_NAME < ./ak3.log
+          printf 'OKI commit: %s\nAnyKernel3 commit: %s\n' "$OKI_COMMIT" "$AK3_COMMIT" >> ./ak3.log
+          if [[ "${{ inputs.ksu_type }}" == "sukisu" ]]; then
+            cat ../sukisu-source.txt >> ./ak3.log
+          fi
+          sha256sum Image > ../build-evidence/Image.sha256
+          zip -r "../$AK3_NAME" ./*
+          zip -z "../$AK3_NAME" < ./ak3.log
+          unzip -tq "../$AK3_NAME"
+          cp ak3.log ../build-evidence/
+          (cd .. && sha256sum "$AK3_NAME" > build-evidence/AnyKernel3.sha256)
 
       - name: 上传 Ccache 调试日志
-        if: always() && inputs.ccache_debug
+        if: always() && inputs.ksu_type != 'sukisu' && inputs.ccache_debug
         uses: actions/upload-artifact@v7
         with:
           name: ccache-debug-log
@@ -738,9 +714,21 @@ jobs:
         with:
           path: ${{ github.workspace }}/kernel_workspace/AnyKernel*.zip
           archive: false
+          if-no-files-found: error
+
+      - name: 上传 Nova 构建证据
+        if: ${{ !cancelled() && inputs.ksu_type == 'sukisu' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: oki-6.6.89-nova-build-evidence
+          path: |
+            kernel_workspace/sukisu-source.txt
+            kernel_workspace/build-evidence/
+          if-no-files-found: ignore
 
   release:
     needs: build
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -756,16 +744,10 @@ jobs:
           skip-decompress: true
 
       - name: 设置环境变量
+        env:
+          FULL_VERSION: ${{ needs.build.outputs.full_version }}
         run: |
-          if [[ -n "${{ github.event.inputs.kernel_suffix }}" ]]; then
-            FULL_VERSION=${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }}-${{ github.event.inputs.kernel_suffix }}
-            echo "FULL_VERSION=$FULL_VERSION" >> $GITHUB_ENV
-            export FULL_VERSION=$FULL_VERSION
-          else
-            FULL_VERSION=${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }}-${{ env.KERNEL_NAME }}
-            echo "FULL_VERSION=$FULL_VERSION" >> $GITHUB_ENV
-            export FULL_VERSION=$FULL_VERSION
-          fi
+          echo "FULL_VERSION=$FULL_VERSION" >> "$GITHUB_ENV"
           TIME="$(TZ='Asia/Shanghai' date +'%y%m%d%H%M%S')"
           TIME_FORM="$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')"
           echo "TIME=$TIME" >> $GITHUB_ENV
@@ -773,7 +755,7 @@ jobs:
           TAG_HEAD="OPPO-OPlus-Realme-build"
           echo "TAG_HEAD=$TAG_HEAD" >> $GITHUB_ENV
           if [[ ${{ github.event.inputs.ksu_type }} == "sukisu" ]]; then
-            KSU_TYPENAME="SukiSU Ultra"
+            KSU_TYPENAME="SukiSU-Nova"
           elif [[ ${{ github.event.inputs.ksu_type }} == "bakasu" ]]; then
             KSU_TYPENAME="BakaSU"
           elif [[ ${{ github.event.inputs.ksu_type }} == "ksunext" ]]; then
@@ -807,7 +789,7 @@ jobs:
           - Re-Kernel支持：${{ github.event.inputs.rekernel_enable }}
           - 内核级基带保护支持：${{ github.event.inputs.baseband_guard }}
           - BakaSU管理器下载：[BakaSU_CI](https://github.com/cctv18/BakaSU_CI/releases)
-          - SukiSU Ultra管理器下载：[SukiSU-Ultra](https://github.com/SukiSU-Ultra/SukiSU-Ultra/releases)
+          - SukiSU-Nova管理器下载：[SukiSU-Nova](https://github.com/SukiSU-Nova/SukiSU-Nova/releases)
           - KernelSU Next管理器下载：[KernelSU-Next](https://github.com/KernelSU-Next/KernelSU-Next/releases)
           - KSU原版管理器下载：[KernelSU](https://github.com/tiann/KernelSU/releases)
           
@@ -818,7 +800,7 @@ jobs:
           ### 📋 安装方法 | Installation Guide
           1. 若你的手机已经安装了第三方Recovery（如TWRP)，可下载对应机型的AnyKernel刷机包后进入Recovery模式，通过Recovery刷入刷机包后重启设备；
           2. 若你的手机之前已有 root 权限，可在手机上安装[HorizonKernelFlasher](https://github.com/libxzr/HorizonKernelFlasher/releases)，在HorizonKernelFlasher中刷入AnyKernel刷机包并重启；
-          3. 若你之前已刷入SukiSU Ultra内核，且SukiSU Ultra管理器已更新至最新版本，可在SukiSU Ultra管理器中直接刷入AnyKernel刷机包并重启；
+          3. 若你之前已刷入SukiSU-Nova内核，且SukiSU-Nova管理器已更新至最新版本，可在SukiSU-Nova管理器中直接刷入AnyKernel刷机包并重启；
           4. 刷入无lz4kd补丁版的内核前若刷入过lz4kd补丁版的内核，为避免出错，请先关闭zram模块；
           5. 由于KernelSU上游更新了元模块功能，最新版KSU管理器（包括除KernelSU Next以外的各分支）需要配合元模块(metamodule)才能正常挂载模块。目前的元模块包括[meta overlayfs](https://github.com/KernelSU-Modules-Repo/meta-overlayfs), [mountify](https://github.com/backslashxx/mountify), [meta magicmount](https://github.com/7a72/meta-magic_mount/), [meta magicmount rs](https://github.com/Tools-cx-app/meta-magic_mount/), [hybrid mount](https://github.com/YuzakiKokuban/meta-hybrid_mount)等。若你是第一次使用KSU或刚从旧版KSU管理器升级至新版，请先安装一个元模块，这样其他涉及系统挂载的模块才能正常运行；
           6. KernelPatch Next（即KPN）是一个独立于KSU的KPM实现，可以运行在任意KSU/面具环境中（不适用于Apatch），且不能与(Re)SukiSU内置的kpm功能共同使用，使用前请保证你的内核没有内置的kpm实现/修补。
