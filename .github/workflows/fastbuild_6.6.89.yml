@@ -129,9 +129,11 @@ jobs:
           src_pid=$!
           tools_url='https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/LLVM-Clang18-r510928'
           (aria2c -s16 -x16 -k1M "$tools_url/clang-r510928.zip" -o clang.zip &&
+           printf '%s  %s\n' '1221635c13d02c5f0c8abb93f38f5d43f5e2f86906ae2e18894ce63e90264164' clang.zip | sha256sum --check --strict &&
            unzip -q clang.zip -d clang18 && rm -f clang.zip) &
           clang_pid=$!
           (aria2c -s16 -x16 -k1M "$tools_url/build-tools.zip" -o build-tools.zip &&
+           printf '%s  %s\n' '9a1a48cdbaababdfbbec9bee06198c60eb12369188b0f24428fb790c488d00ec' build-tools.zip | sha256sum --check --strict &&
            unzip -q build-tools.zip && rm -f build-tools.zip) &
           tools_pid=$!
           for pid in "$apt_pid" "$src_pid" "$clang_pid" "$tools_pid"; do
@@ -414,12 +416,7 @@ jobs:
           echo "CONFIG_IP_SET_HASH_NETPORT=y" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_IP_SET_HASH_NETIFACE=y" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_IP_SET_LIST_SET=y" >> ./common/arch/arm64/configs/gki_defconfig
-          #启用 IPv6 网络地址转换
-          echo "CONFIG_IP6_NF_NAT=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_IP6_NF_TARGET_MASQUERADE=y" >> ./common/arch/arm64/configs/gki_defconfig
-          #由于部分机型的vintf兼容性检测规则，在开启CONFIG_IP6_NF_NAT后开机会出现"您的设备内部出现了问题。请联系您的设备制造商了解详情。"的提示，故添加一个配置修复补丁，在编译内核时隐藏CONFIG_IP6_NF_NAT=y但不影响对应功能编译
-          cd common
-          patch --batch --forward -p1 -F 3 < "$GITHUB_WORKSPACE/other_patch/config.patch"
+          # 保留厂商的 IPv6 NAT 配置，避免强制启用不兼容的选项。
 
       - name: 添加 BBR 等一系列拥塞控制算法
         run: |
@@ -593,7 +590,7 @@ jobs:
             }
             require_y CONFIG_KSU CONFIG_HEADERS_INSTALL
             if [[ "$BETTER_NET" == true ]]; then
-              require_y CONFIG_BPF_STREAM_PARSER CONFIG_IP_SET CONFIG_NETFILTER_XT_SET CONFIG_IP6_NF_NAT
+              require_y CONFIG_BPF_STREAM_PARSER CONFIG_IP_SET CONFIG_NETFILTER_XT_SET CONFIG_NETFILTER_XT_MATCH_ADDRTYPE
             fi
             if [[ "$ADIOS_ENABLE" == true ]]; then
               require_y CONFIG_MQ_IOSCHED_ADIOS CONFIG_MQ_IOSCHED_DEFAULT_ADIOS
@@ -612,6 +609,7 @@ jobs:
           fi
           make "${build_args[@]}" Image 2>&1 | tee ../build-evidence/compile.log
           test -s out/arch/arm64/boot/Image
+          cp out/.config ../build-evidence/kernel.config
           if [[ "${{ inputs.ksu_type }}" == "sukisu" ]]; then
             bash "$GITHUB_WORKSPACE/scripts/verify_sukisu_build.sh" "${{ inputs.susfs_enable }}"
           else
@@ -636,7 +634,13 @@ jobs:
           ./kptools-linux -p -i ./Image -k ./kpimg-linux -o ./oImage
           rm -f Image
           mv oImage Image
-          
+
+      - name: 核对待打包镜像的内嵌配置
+        run: |
+          cd kernel_workspace
+          python3 "$GITHUB_WORKSPACE/scripts/verify_image_config.py" \
+            common/out/arch/arm64/boot/Image build-evidence/kernel.config
+
       - name: 克隆 AnyKernel3 并打包
         id: create_zip
         run: |

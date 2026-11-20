@@ -131,6 +131,30 @@ class WorkflowIntegrationTests(unittest.TestCase):
         self.assertIn(workflow["env"]["OKI_COMMIT"], local)
         self.assertIn("apply_compression_6.6.89.sh", local)
 
+    def test_oki_689_checks_final_image_before_packaging(self):
+        workflow = next(w for p, w in self.workflows if p.name == "fastbuild_6.6.89.yml")
+        steps = workflow["jobs"]["build"]["steps"]
+        build = run_step(workflow, "tee ../build-evidence/compile.log")
+        check = run_step(workflow, "verify_image_config.py")
+        self.assertIn("common/out/arch/arm64/boot/Image build-evidence/kernel.config", check["run"])
+        self.assertLess(make_target(build["run"], "Image"), build["run"].rindex("cp out/.config"))
+        self.assertLess(steps.index(run_step(workflow, "./kptools-linux -p")), steps.index(check))
+        self.assertLess(steps.index(check), steps.index(run_step(workflow, "git clone https://github.com/cctv18/AnyKernel3")))
+
+        local = read("local/builder_6.6.89.sh")
+        self.assertLess(local.index("./kptools-linux -p"), local.index("verify_image_config.py"))
+        self.assertLess(local.index("verify_image_config.py"), local.index("git clone https://github.com/cctv18/AnyKernel3"))
+
+    def test_oki_689_net_extensions_leave_vendor_ipv6_nat_unchanged(self):
+        workflow = next(w for p, w in self.workflows if p.name == "fastbuild_6.6.89.yml")
+        net = run_step(workflow, 'echo "CONFIG_IP_SET_MAX=65534"')["run"]
+        local = read("local/builder_6.6.89.sh")
+        for script in (net, local):
+            self.assertIn('echo "CONFIG_IP_SET=y"', script)
+            self.assertIn('echo "CONFIG_NETFILTER_XT_SET=y"', script)
+            self.assertNotIn("IP6_NF_NAT=y", script)
+            self.assertNotIn("config.patch", script)
+
     def test_release_notes_link_to_nova_ci_channel(self):
         ci_url = re.search(r"^SUKISU_CI_RELEASE_URL=(.+)$", read("scripts/sukisu_sources.env"), re.M)[1]
         for path, workflow in self.workflows:
