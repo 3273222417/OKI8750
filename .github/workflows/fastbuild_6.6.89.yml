@@ -646,6 +646,9 @@ jobs:
           fi
           make "${build_args[@]}" Image 2>&1 | tee ../build-evidence/compile.log
           test -s out/arch/arm64/boot/Image
+          if [[ "${{ inputs.ksu_type }}" == "sukisu" && "${{ inputs.lz4_enable }}" == "true" ]]; then
+            make "${build_args[@]}" drivers/block/zram/zram.ko mm/zsmalloc.ko
+          fi
           cp out/.config ../build-evidence/kernel.config
           if [[ "${{ inputs.ksu_type }}" == "sukisu" ]]; then
             bash "$GITHUB_WORKSPACE/scripts/verify_sukisu_build.sh" "${{ inputs.susfs_enable }}" "${{ inputs.use_nomount }}"
@@ -687,6 +690,18 @@ jobs:
           cd kernel_workspace
           python3 "$GITHUB_WORKSPACE/scripts/verify_image_config.py" \
             common/out/arch/arm64/boot/Image build-evidence/kernel.config
+
+      - name: 打包匹配的 LZ4/ZSTD ZRAM 模块
+        if: ${{ success() && inputs.ksu_type == 'sukisu' && inputs.lz4_enable }}
+        run: |
+          cd kernel_workspace
+          mkdir -p companion-artifacts
+          grep -Fxq 'CONFIG_ZRAM=m' common/out/.config
+          grep -Fxq 'CONFIG_ZSMALLOC=m' common/out/.config
+          bash "$GITHUB_WORKSPACE/scripts/package_zram_module.sh" \
+            common "companion-artifacts/zram-lz4-1.10.0-zstd-1.5.7-${KSUVER}.zip" \
+            "${KSUVER}"
+          printf 'ZRAM_MODULE_VERSION=%s\n' "$KSUVER" >> companion-artifacts/companion-source.txt
 
       - name: 克隆 AnyKernel3 并打包
         id: create_zip
@@ -809,6 +824,14 @@ jobs:
         with:
           name: ${{ steps.companions.outputs.nomount_artifact_name }}
           path: kernel_workspace/companion-artifacts/${{ steps.companions.outputs.nomount_file }}
+          if-no-files-found: error
+
+      - name: 上传 LZ4/ZSTD ZRAM 模块
+        if: ${{ success() && inputs.ksu_type == 'sukisu' && inputs.lz4_enable }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: zram-lz4-1.10.0-zstd-1.5.7-${{ steps.ksu_version.outputs.ksuver }}
+          path: kernel_workspace/companion-artifacts/zram-lz4-1.10.0-zstd-1.5.7-${{ steps.ksu_version.outputs.ksuver }}.zip
           if-no-files-found: error
 
   release:

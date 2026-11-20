@@ -135,6 +135,16 @@ class WorkflowIntegrationTests(unittest.TestCase):
         self.assertIn("${{ steps.companions.outputs.susfs_artifact_name }}", upload_names)
         self.assertIn("${{ steps.companions.outputs.nomount_artifact_name }}", upload_names)
 
+    def test_oki_689_uploads_matching_lz4_zstd_zram_module(self):
+        workflow = next(w for p, w in self.workflows if p.name == "fastbuild_6.6.89.yml")
+        runs = "\n".join(step.get("run", "") for step in workflow["jobs"]["build"]["steps"])
+        self.assertIn("package_zram_module.sh", runs)
+        self.assertIn("CONFIG_ZRAM=m", runs)
+        self.assertIn("CONFIG_ZSMALLOC=m", runs)
+        upload_names = [step.get("with", {}).get("name", "") for step in workflow["jobs"]["build"]["steps"]]
+        self.assertIn("zram-lz4-1.10.0-zstd-1.5.7-${{ steps.ksu_version.outputs.ksuver }}", upload_names)
+        self.assertLess(runs.index("make \"${build_args[@]}\" drivers/block/zram/zram.ko mm/zsmalloc.ko"), runs.index("package_zram_module.sh"))
+
     def test_susfs_companion_comes_from_successful_ci_artifact(self):
         script = read("scripts/fetch_companion_modules.sh")
         env = read("scripts/sukisu_sources.env")
@@ -234,6 +244,9 @@ class LocalIntegrationTests(unittest.TestCase):
                 self.assertLess(make_target(text, "headers_install"), make_target(text, "all"))
                 self.assertIn("test -s out/usr/include/linux/unistd.h", text)
                 self.assertIn("test -s out/arch/arm64/boot/Image", text)
+                if path.name == "builder_6.6.89.sh":
+                    self.assertIn("package_zram_module.sh", text)
+                    self.assertIn("drivers/block/zram/zram.ko mm/zsmalloc.ko", text)
                 self.assertLess(make_target(text, "all"), text.index("verify_sukisu_build.sh"))
                 self.assertLess(text.index("verify_sukisu_build.sh"), text.index("./kptools-linux -p"))
                 self.assertRegex(text, r"apt-get install[^\n]*\brsync\b")
@@ -301,6 +314,15 @@ class SharedIntegrationContractTests(unittest.TestCase):
         self.assertIn("out/drivers/kernelsu/core/.init.o.cmd", script)
         self.assertIn('CI_VERSION="${SUKISU_CI_VERSION_CODE:-${KSUVER:-}}"', script)
         self.assertIn("-DKSU_VERSION=$CI_VERSION([[:space:]]|$)", script)
+
+    def test_zram_module_package_is_kernel_matched(self):
+        script = read("scripts/package_zram_module.sh")
+        service = read("scripts/zram_service.sh")
+        self.assertIn("out/drivers/block/zram/zram.ko", script)
+        self.assertIn("out/mm/zsmalloc.ko", script)
+        self.assertIn("LZ4 1.10.0 + ZSTD 1.5.7", script)
+        self.assertIn("rmmod zram", service)
+        self.assertIn("zsmalloc.ko", service)
 
 
 if __name__ == "__main__":

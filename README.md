@@ -30,7 +30,7 @@
 
 `bakasu` 仍单独使用 BakaSU。Nova 构建先安装 UAPI 头文件，再编译其 preinit runner 和内核。本地 Linux 可运行 `bash local/builder_6.6.89.sh`，在 KSU 分支提示中选 `y`。
 
-成功运行的 **Artifacts** 包含 `AnyKernel3_SukiSU-Nova_*.zip`、`SukiSU-Nova-Manager-*`、`susfs-*`、`nomount-*` 和 `oki-6.6.89-nova-build-evidence`；Nova 编译使用独立的 ccache 缓存。编译成功不等于已经在真机验证；刷入前确认机型、系统版本并备份原始启动镜像。
+成功运行的 **Artifacts** 包含 `AnyKernel3_SukiSU-Nova_*.zip`、`SukiSU-Nova-Manager-*`、版本化的 `susfs-*`、`nomount-*`、`zram-lz4-1.10.0-zstd-1.5.7-*` 和 `oki-6.6.89-nova-build-evidence`。其中 `zram-lz4-1.10.0-zstd-1.5.7-*` 搭载本次 6.6.89 构建实际生成的 `zram.ko`/`zsmalloc.ko`，与旧的 5.15 `zram.zip` 不混用；Nova 编译使用独立的 ccache 缓存。编译成功不等于已经在真机验证；刷入前确认机型、系统版本并备份原始启动镜像。
 
 6.6.89 的网络拓展保留 `ipset`、iptables 匹配项和 BPF 流解析；IPv6 NAT 沿用厂商配置。打包前检查最终 `Image` 的内嵌配置是否与编译后的 `.config` 完全一致，不一致时停止打包。该检查不验证机型或真机启动兼容性。
 

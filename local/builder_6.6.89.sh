@@ -389,6 +389,9 @@ if [[ "$KSU_BRANCH" == [yY] ]]; then
 fi
 make -j$(nproc --all) LLVM=-18 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnuabeihf- CC=clang LD=ld.lld HOSTCC=clang HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error all
 test -s out/arch/arm64/boot/Image
+if [[ "$KSU_BRANCH" == [yY] && "$APPLY_LZ4" == [yY] ]]; then
+  make -j$(nproc --all) LLVM=-18 ARCH=arm64 CC=clang LD=ld.lld O=out drivers/block/zram/zram.ko mm/zsmalloc.ko
+fi
 if [[ "$KSU_BRANCH" == [yY] ]]; then
   bash "$SCRIPT_DIR/../scripts/verify_sukisu_build.sh" "$NOVA_SUSFS" "$([[ "$APPLY_NOMOUNT" == [yY] ]] && echo true || echo false)"
 fi
@@ -410,6 +413,16 @@ fi
 
 python3 "$SCRIPT_DIR/../scripts/verify_image_config.py" \
   "$OUT_DIR/Image" "$WORKDIR/kernel_workspace/common/out/.config"
+
+if [[ "$KSU_BRANCH" == [yY] && "$APPLY_LZ4" == [yY] ]]; then
+  NOVA_VERSION="$(awk -F= '$1 == "KSUVER" {print $2; exit}' "$WORKDIR/kernel_workspace/sukisu-source.txt")"
+  test -n "$NOVA_VERSION"
+  mkdir -p "$WORKDIR/kernel_workspace/companion-artifacts"
+  bash "$SCRIPT_DIR/../scripts/package_zram_module.sh" \
+    "$WORKDIR/kernel_workspace/common" \
+    "$WORKDIR/kernel_workspace/companion-artifacts/zram-lz4-1.10.0-zstd-1.5.7-${NOVA_VERSION}.zip" \
+    "$NOVA_VERSION"
+fi
 
 # ===== 克隆并打包 AnyKernel3 =====
 cd "$WORKDIR/kernel_workspace"
