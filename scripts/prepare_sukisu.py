@@ -29,7 +29,7 @@ def prepare(workspace, susfs, version, count, ref, tag):
         raise ValueError("SUSFS requires the Nova builtin source, not main")
 
     # Keep the actual checked-out source SHA in KSU_VERSION_FULL. Resolve the
-    # version once from the pinned main history (also used by Nova's manager),
+    # version once from the complete current main history (also used by Nova's manager),
     # never from BakaSU's +30700 formula or live HTTP calls during make.
     replacements = {
         "REPO_BRANCH": ref,

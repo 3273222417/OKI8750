@@ -66,7 +66,7 @@ on:
         description: '是否开启网络功能拓展配置(用于为ipset及需要iptables等高级网络功能内核支持的程序提供支持)'
         required: true
         type: boolean
-        default: 'false'
+        default: 'true'
       adios_enable:
         description: '是否启用ADIOS IO调度器支持(提升IO读写性能)'
         required: true
@@ -76,12 +76,17 @@ on:
         description: '是否启用Re-Kernel支持(与Freezer/NoActive等软件配合, 提升应用冻结能力)'
         required: true
         type: boolean
-        default: 'false'
+        default: 'true'
+      use_nomount:
+        description: '是否集成 NoMount 挂载元模块（同时上传配套模块）'
+        required: true
+        type: boolean
+        default: 'true'
       baseband_guard:
         description: '是否开启内核级基带保护(阻止一切对非用户分区的写入，有效防止格机)'
         required: true
         type: boolean
-        default: 'true'
+        default: 'false'
       ccache_update:
         description: '更新ccache缓存(将本次编译生成的ccache缓存覆盖至仓库缓存，在更改编译配置、源码或需要刷新缓存时开启)'
         required: true
@@ -115,13 +120,23 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: 配置 Nova ccache
+        if: inputs.ksu_type == 'sukisu'
+        id: nova-cache
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ccache-nova-6.6.89
+          key: nova-ccache-6.6.89-${{ runner.os }}-${{ hashFiles('.github/workflows/fastbuild_6.6.89.yml', 'scripts/**', 'other_patch/**') }}
+          restore-keys: |
+            nova-ccache-6.6.89-${{ runner.os }}-
+
       - name: 安装环境依赖+初始化源码仓库及llvm-Clang18工具链
         run: |
           set -euo pipefail
           mkdir kernel_workspace
           cd kernel_workspace
           (sudo apt-get update -q && sudo apt-get install -y --no-install-recommends \
-            bc bison flex binutils python-is-python3 libssl-dev libelf-dev rsync) &
+            bc bison flex binutils python-is-python3 libssl-dev libelf-dev rsync jq ccache) &
           apt_pid=$!
           (curl -fLsS --retry 3 --connect-timeout 30 -o common.zip \
              "https://codeload.github.com/cctv18/android_kernel_common_oneplus_sm8750/zip/$OKI_COMMIT" &&
@@ -458,6 +473,10 @@ jobs:
             fi
           fi
 
+      - name: 集成 NoMount 挂载元模块
+        if: inputs.ksu_type == 'sukisu' && inputs.use_nomount
+        run: bash "$GITHUB_WORKSPACE/scripts/setup_nomount.sh" "$PWD/kernel_workspace"
+
       - name: 启用 Droidspaces 容器支持
         run: |
           if [[ "${{ github.event.inputs.droidspaces_enable }}" != "false" ]]; then
@@ -562,7 +581,22 @@ jobs:
           mkdir -p ../build-evidence
           cc=clang
           ld=ld.lld
-          if [[ "${{ inputs.ksu_type }}" != "sukisu" ]]; then
+          if [[ "${{ inputs.ksu_type }}" == "sukisu" ]]; then
+            export CCACHE_DIR="$HOME/.cache/ccache-nova-6.6.89"
+            export CCACHE_COMPILERCHECK=none CCACHE_BASEDIR="$WORKDIR"
+            export CCACHE_NOHASHDIR=true CCACHE_NOHARDLINK=true CCACHE_MAXSIZE=4G CCACHE_IS_KERNEL_COMPILING=true
+            export CCACHE_CPP2=true
+            mkdir -p "$CCACHE_DIR"
+            ccache --set-config=cache_dir="$CCACHE_DIR"
+            ccache --set-config=max_size=4G
+            ccache --set-config=compression=true
+            ccache --set-config=compiler_check=none
+            ccache -z
+            ccache -M 4G
+            printf '#!/bin/bash\nexec /usr/bin/ccache clang "$@"\n' > cc-wrapper
+            chmod +x cc-wrapper
+            cc="$PWD/cc-wrapper"
+          else
             export CCACHE_LOGFILE="$WORKDIR/kernel_workspace/ccache.log"
             export CCACHE_COMPILERCHECK=none CCACHE_BASEDIR="$WORKDIR"
             export CCACHE_NOHASHDIR=true CCACHE_NOHARDLINK=true CCACHE_MAXSIZE=3G CCACHE_IS_KERNEL_COMPILING=true
@@ -592,6 +626,9 @@ jobs:
             if [[ "$BETTER_NET" == true ]]; then
               require_y CONFIG_BPF_STREAM_PARSER CONFIG_IP_SET CONFIG_NETFILTER_XT_SET CONFIG_NETFILTER_XT_MATCH_ADDRTYPE
             fi
+            if [[ "${{ inputs.use_nomount }}" == true ]]; then
+              require_y CONFIG_NOMOUNT
+            fi
             if [[ "$ADIOS_ENABLE" == true ]]; then
               require_y CONFIG_MQ_IOSCHED_ADIOS CONFIG_MQ_IOSCHED_DEFAULT_ADIOS
             fi
@@ -611,9 +648,12 @@ jobs:
           test -s out/arch/arm64/boot/Image
           cp out/.config ../build-evidence/kernel.config
           if [[ "${{ inputs.ksu_type }}" == "sukisu" ]]; then
-            bash "$GITHUB_WORKSPACE/scripts/verify_sukisu_build.sh" "${{ inputs.susfs_enable }}"
+            bash "$GITHUB_WORKSPACE/scripts/verify_sukisu_build.sh" "${{ inputs.susfs_enable }}" "${{ inputs.use_nomount }}"
           else
             /usr/bin/ccache -s
+          fi
+          if [[ "${{ inputs.ksu_type }}" == "sukisu" ]]; then
+            ccache -s
           fi
 
       - name: 保存新的 ccache 缓存
@@ -622,6 +662,13 @@ jobs:
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ${{ env.CCACHE_REAL_KEY }}-${{ runner.os }}-${{ github.ref_name }}
+
+      - name: 保存 Nova ccache 缓存
+        if: inputs.ksu_type == 'sukisu' && steps.nova-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ~/.cache/ccache-nova-6.6.89
+          key: nova-ccache-6.6.89-${{ runner.os }}-${{ hashFiles('.github/workflows/fastbuild_6.6.89.yml', 'scripts/**', 'other_patch/**') }}
          
       - name: 应用KPM并修补内核
         if: inputs.kpm_enable
@@ -694,6 +741,7 @@ jobs:
           echo "ADIOS: ${{ github.event.inputs.adios_enable }}" >> ./ak3.log
           echo "Re-Kernel: ${{ github.event.inputs.rekernel_enable }}" >> ./ak3.log
           echo "BBG: ${{ github.event.inputs.baseband_guard }}" >> ./ak3.log
+          echo "NoMount: ${{ github.event.inputs.use_nomount }}" >> ./ak3.log
           printf 'OKI commit: %s\nAnyKernel3 commit: %s\n' "$OKI_COMMIT" "$AK3_COMMIT" >> ./ak3.log
           if [[ "${{ inputs.ksu_type }}" == "sukisu" ]]; then
             cat ../sukisu-source.txt >> ./ak3.log
@@ -720,15 +768,47 @@ jobs:
           archive: false
           if-no-files-found: error
 
+      - name: 获取配套模块
+        if: ${{ success() && inputs.ksu_type == 'sukisu' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          bash "$GITHUB_WORKSPACE/scripts/fetch_companion_modules.sh" \
+            "$PWD/kernel_workspace/companion-artifacts" "${{ inputs.use_nomount }}"
+
       - name: 上传 Nova 构建证据
-        if: ${{ !cancelled() && inputs.ksu_type == 'sukisu' }}
+        if: ${{ success() && inputs.ksu_type == 'sukisu' }}
         uses: actions/upload-artifact@v7
         with:
           name: oki-6.6.89-nova-build-evidence
           path: |
             kernel_workspace/sukisu-source.txt
             kernel_workspace/build-evidence/
-          if-no-files-found: ignore
+            kernel_workspace/companion-artifacts/companion-source.txt
+
+      - name: 上传 SukiSU-Nova 管理器
+        if: ${{ success() && inputs.ksu_type == 'sukisu' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: SukiSU-Nova-Manager-${{ steps.ksu_version.outputs.ksuver }}
+          path: kernel_workspace/manager-artifacts/*.apk
+          if-no-files-found: error
+
+      - name: 上传 SUSFS 模块
+        if: ${{ success() && inputs.ksu_type == 'sukisu' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: susfs-latest
+          path: kernel_workspace/companion-artifacts/susfs-latest.zip
+          if-no-files-found: error
+
+      - name: 上传 NoMount 模块
+        if: ${{ success() && inputs.ksu_type == 'sukisu' && inputs.use_nomount }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: nomount-latest
+          path: kernel_workspace/companion-artifacts/nomount-latest.zip
+          if-no-files-found: error
 
   release:
     needs: build

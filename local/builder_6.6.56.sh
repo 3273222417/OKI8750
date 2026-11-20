@@ -82,7 +82,7 @@ SU() {
 SU apt-mark hold firefox && apt-mark hold libc-bin && apt-mark hold man-db
 SU rm -rf /var/lib/man-db/auto-update
 SU apt-get update
-SU apt-get install --no-install-recommends -y curl bison flex clang binutils dwarves git lld pahole zip perl make gcc python3 python-is-python3 bc libssl-dev libelf-dev rsync cpio xz-utils tar unzip
+SU apt-get install --no-install-recommends -y curl jq bison flex clang binutils dwarves git lld pahole zip perl make gcc python3 python-is-python3 bc libssl-dev libelf-dev rsync cpio xz-utils tar unzip
 SU rm -rf ./llvm.sh && wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh
 SU ./llvm.sh 18 all
 

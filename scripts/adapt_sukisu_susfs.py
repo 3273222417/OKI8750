@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Adapt the pinned SUSFS 2.4 kernel hooks to SukiSU-Nova builtin.
+"""Adapt the validated SUSFS kernel hooks to SukiSU-Nova builtin.
 
 Evidence: SukiSU-Nova/SukiSU-Nova builtin 4bec532dd447e2852aa8932afa768255350c103a
 and cctv18/susfs4oki oki-android15-6.6 c7f303f504b36d25b9a2e753edde7cd927f47e4f.

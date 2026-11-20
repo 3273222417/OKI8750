@@ -22,14 +22,15 @@
 | `ksu_type` | `sukisu`（SukiSU-Nova） |
 | `susfs_enable`、`lz4_enable`、`better_net` | `true` |
 | `adios_enable`、`rekernel_enable` | `true` |
+| `use_nomount` | `true`（同时上传 NoMount 配套模块） |
 | `baseband_guard` | `false` |
 | 其他选项 | 保持默认 |
 
-`sukisu` 从 [SukiSU-Nova 官方 Forgejo](https://git.zako.shirkneko.top:20004/shirkneko/SukiSU)拉取与 **Manager CI 35042** 对齐的[固定提交](scripts/sukisu_sources.env)：不开 SUSFS 时编译 `main` 的 `81bbac83`，开启时编译独立的 `builtin` 提交 `8c6c52a0`。两种构建都从已固定的 `main` 提交计算版本号，并在编译后核对实际版本。上游 `manager-ci` 发布是滚动更新的，下载 [CI 管理器](https://git.zako.shirkneko.top:20004/shirkneko/SukiSU/releases/tag/manager-ci)时请核对 APK 文件名中的 `35042`；后续 CI 版本不会自动改变本仓库的源码。
+`sukisu` 每次构建都会从 [SukiSU-Nova 官方 Forgejo](https://git.zako.shirkneko.top:20004/shirkneko/SukiSU)读取 `main` 当前提交，并轮询滚动的 `manager-ci`，直到 APK versionCode 与该提交的版本计数一致；开启 SUSFS 时使用同一轮的 `builtin` 提交。源码 SHA、Manager APK、内核版本不会写死在仓库中。流程会上传当前 Manager APK、SUSFS 模块和（默认开启的）NoMount 模块，并把实际来源写入 `sukisu-source.txt`。
 
 `bakasu` 仍单独使用 BakaSU。Nova 构建先安装 UAPI 头文件，再编译其 preinit runner 和内核。本地 Linux 可运行 `bash local/builder_6.6.89.sh`，在 KSU 分支提示中选 `y`。
 
-成功运行的 **Artifacts** 包含 `AnyKernel3_SukiSU-Nova_*.zip`；`oki-6.6.89-nova-build-evidence` 保留实际内核配置、源码版本、编译日志和 SHA-256。编译成功不等于已经在真机验证；刷入前确认机型、系统版本并备份原始启动镜像。
+成功运行的 **Artifacts** 包含 `AnyKernel3_SukiSU-Nova_*.zip`、`SukiSU-Nova-Manager-*`、`susfs-*`、`nomount-*` 和 `oki-6.6.89-nova-build-evidence`；Nova 编译使用独立的 ccache 缓存。编译成功不等于已经在真机验证；刷入前确认机型、系统版本并备份原始启动镜像。
 
 6.6.89 的网络拓展保留 `ipset`、iptables 匹配项和 BPF 流解析；IPv6 NAT 沿用厂商配置。打包前检查最终 `Image` 的内嵌配置是否与编译后的 `.config` 完全一致，不一致时停止打包。该检查不验证机型或真机启动兼容性。
 

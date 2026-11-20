@@ -30,9 +30,11 @@ APPLY_DROIDSPACES=${APPLY_DROIDSPACES:-n}
 read -p "是否启用ADIOS调度器？(y/n，默认：y): " APPLY_ADIOS
 APPLY_ADIOS=${APPLY_ADIOS:-y}
 read -p "是否启用Re-Kernel？(y/n，默认：n): " APPLY_REKERNEL
-APPLY_REKERNEL=${APPLY_REKERNEL:-n}
+APPLY_REKERNEL=${APPLY_REKERNEL:-y}
+read -p "是否集成NoMount挂载元模块？(y/n，默认：y): " APPLY_NOMOUNT
+APPLY_NOMOUNT=${APPLY_NOMOUNT:-y}
 read -p "是否启用内核级基带保护？(y/n，默认：y): " APPLY_BBG
-APPLY_BBG=${APPLY_BBG:-y}
+APPLY_BBG=${APPLY_BBG:-n}
 
 if [[ "$KSU_BRANCH" == "y" || "$KSU_BRANCH" == "Y" ]]; then
   KSU_TYPE="SukiSU-Nova"
@@ -60,6 +62,7 @@ echo "应用 BBR 等算法: $APPLY_BBR"
 echo "应用 Droidspaces 容器支持: $APPLY_DROIDSPACES"
 echo "启用ADIOS调度器: $APPLY_ADIOS"
 echo "启用Re-Kernel: $APPLY_REKERNEL"
+echo "启用NoMount: $APPLY_NOMOUNT"
 echo "启用内核级基带保护: $APPLY_BBG"
 echo "===================="
 echo
@@ -82,7 +85,7 @@ SU() {
 SU apt-mark hold firefox && apt-mark hold libc-bin && apt-mark hold man-db
 SU rm -rf /var/lib/man-db/auto-update
 SU apt-get update
-SU apt-get install --no-install-recommends -y curl bison flex clang binutils dwarves git lld pahole zip perl make gcc python3 python-is-python3 bc libssl-dev libelf-dev rsync cpio xz-utils tar unzip
+SU apt-get install --no-install-recommends -y curl jq bison flex clang binutils dwarves git lld pahole zip perl make gcc python3 python-is-python3 bc libssl-dev libelf-dev rsync cpio xz-utils tar unzip
 SU rm -rf ./llvm.sh && wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh
 SU ./llvm.sh 18 all
 
@@ -167,6 +170,9 @@ else
   echo ">>> 未开启susfs，跳过susfs补丁配置..."
 fi
 cd "$WORKDIR/kernel_workspace"
+if [[ "$KSU_BRANCH" == [yY] && "$APPLY_NOMOUNT" == [yY] ]]; then
+  bash "$SCRIPT_DIR/../scripts/setup_nomount.sh" "$PWD"
+fi
 if [[ "$KSU_BRANCH" == [kK] && "$APPLY_SUSFS" == [yY] ]]; then
   cp ./susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./KernelSU/
   cd ./KernelSU
@@ -384,7 +390,7 @@ fi
 make -j$(nproc --all) LLVM=-18 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnuabeihf- CC=clang LD=ld.lld HOSTCC=clang HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error all
 test -s out/arch/arm64/boot/Image
 if [[ "$KSU_BRANCH" == [yY] ]]; then
-  bash "$SCRIPT_DIR/../scripts/verify_sukisu_build.sh" "$NOVA_SUSFS"
+  bash "$SCRIPT_DIR/../scripts/verify_sukisu_build.sh" "$NOVA_SUSFS" "$([[ "$APPLY_NOMOUNT" == [yY] ]] && echo true || echo false)"
 fi
 echo ">>> 内核编译成功！"
 
@@ -457,6 +463,9 @@ if [[ "$APPLY_ADIOS" == "y" || "$APPLY_ADIOS" == "Y" ]]; then
 fi
 if [[ "$APPLY_REKERNEL" == "y" || "$APPLY_REKERNEL" == "Y" ]]; then
   ZIP_NAME="${ZIP_NAME}-rek"
+fi
+if [[ "$KSU_BRANCH" == [yY] && "$APPLY_NOMOUNT" == [yY] ]]; then
+  ZIP_NAME="${ZIP_NAME}-nomount"
 fi
 if [[ "$APPLY_BBG" == "y" || "$APPLY_BBG" == "Y" ]]; then
   ZIP_NAME="${ZIP_NAME}-bbg"

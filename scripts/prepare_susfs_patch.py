@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Select the matching vendor VMA hunk in the pinned SUSFS patch."""
+"""Select the matching vendor VMA hunk in the current SUSFS patch."""
 
 import re
 import sys

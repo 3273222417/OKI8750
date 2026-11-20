@@ -121,6 +121,27 @@ class WorkflowIntegrationTests(unittest.TestCase):
                 self.assertIn('KSU_TYPENAME="SukiSU-Nova"', run)
                 self.assertIn("ak3.log", run)
 
+    def test_oki_689_dynamic_ci_and_companion_artifacts(self):
+        workflow = next(w for p, w in self.workflows if p.name == "fastbuild_6.6.89.yml")
+        inputs = workflow["on"]["workflow_dispatch"]["inputs"]
+        self.assertEqual("true", inputs["use_nomount"]["default"])
+        build = workflow["jobs"]["build"]
+        runs = "\n".join(step.get("run", "") for step in build["steps"])
+        self.assertIn("fetch_companion_modules.sh", runs)
+        self.assertIn("setup_nomount.sh", runs)
+        self.assertIn("manager-ci", read("scripts/setup_sukisu.sh"))
+        self.assertIn("SukiSU-Nova-Manager-", "\n".join(step.get("with", {}).get("name", "") for step in build["steps"]))
+        upload_names = [step.get("with", {}).get("name", "") for step in build["steps"]]
+        self.assertIn("susfs-latest", upload_names)
+        self.assertIn("nomount-latest", upload_names)
+
+    def test_oki_689_nova_cache_wraps_compiler(self):
+        workflow = next(w for p, w in self.workflows if p.name == "fastbuild_6.6.89.yml")
+        runs = "\n".join(step.get("run", "") for step in workflow["jobs"]["build"]["steps"])
+        self.assertIn("$HOME/.cache/ccache-nova-6.6.89", runs)
+        self.assertIn("exec /usr/bin/ccache clang", runs)
+        self.assertIn("actions/cache/save@v5", "\n".join(step.get("uses", "") for step in workflow["jobs"]["build"]["steps"]))
+
     def test_oki_689_uses_reviewed_compression_and_no_branch_release(self):
         workflow = next(w for p, w in self.workflows if p.name == "fastbuild_6.6.89.yml")
         step = run_step(workflow, "apply_compression_6.6.89.sh")
@@ -223,29 +244,32 @@ class SharedIntegrationContractTests(unittest.TestCase):
         self.assertEqual("n", literals["CONFIG_KPM"])
         self.assertIn('"$SCRIPT_DIR/prepare_sukisu.py"', read("scripts/setup_sukisu.sh"))
 
-    def test_pinned_official_sources_and_full_history_version(self):
+    def test_dynamic_official_sources_and_full_history_version(self):
         env = dict(re.findall(r"^([A-Z_]+)=([^\n]+)$", read("scripts/sukisu_sources.env"), re.M))
         self.assertEqual("https://git.zako.shirkneko.top:20004/shirkneko/SukiSU.git", env["SUKISU_REPOSITORY"])
         self.assertEqual(env["SUKISU_REPOSITORY"].removesuffix(".git") + "/releases/tag/manager-ci", env["SUKISU_CI_RELEASE_URL"])
-        self.assertRegex(env["SUKISU_CI_VERSION_CODE"], r"^[1-9][0-9]+$")
-        for key in ("SUKISU_MAIN_COMMIT", "SUKISU_BUILTIN_COMMIT", "SUKISU_SUSFS_COMMIT"):
-            self.assertRegex(env[key], r"^[0-9a-f]{40}$")
+        self.assertEqual("manager-ci", env["SUKISU_CI_TAG"])
+        self.assertRegex(env["SUKISU_CI_MAX_ATTEMPTS"], r"^[1-9][0-9]*$")
+        self.assertRegex(env["SUKISU_CI_RETRY_SECONDS"], r"^[1-9][0-9]*$")
         self.assertEqual("30000", env["SUKISU_VERSION_BASE"])
         self.assertEqual("996", env["SUKISU_VERSION_OFFSET"])
         setup = read("scripts/setup_sukisu.sh")
-        self.assertIn('true) BRANCH=builtin; COMMIT="$SUKISU_BUILTIN_COMMIT"', setup)
-        self.assertIn('false) BRANCH=main; COMMIT="$SUKISU_MAIN_COMMIT"', setup)
-        self.assertIn('rev-list --count "$SUKISU_MAIN_COMMIT"', setup)
+        self.assertIn('true) BRANCH=builtin', setup)
+        self.assertIn('false) BRANCH=main', setup)
+        self.assertIn('rev-list --count "$MAIN_COMMIT"', setup)
         self.assertIn("rev-parse --is-shallow-repository", setup)
-        self.assertIn('"$VERSION" != "$SUKISU_CI_VERSION_CODE"', setup)
+        self.assertIn('manager_target" == "$MAIN_COMMIT"', setup)
+        self.assertIn('manager_version" == "$VERSION"', setup)
         self.assertIn('checkout --detach "$COMMIT"', setup)
-        self.assertNotRegex(setup, r"(?m)^\s*curl\b")
+        self.assertIn('manager-artifacts', setup)
+        self.assertIn('SUKISU_CI_API', read("scripts/sukisu_sources.env"))
 
     def test_susfs_patch_must_succeed_before_adapter(self):
         script = read("scripts/apply_sukisu_susfs.sh")
         active = "\n".join(line for line in script.splitlines() if not line.lstrip().startswith("#"))
         self.assertIn("set -euo pipefail", active)
-        self.assertIn('"$SUKISU_SUSFS_COMMIT"', active)
+        self.assertIn('SUKISU_SUSFS_BRANCH', active)
+        self.assertIn('SUSFS_COMMIT=', active)
         self.assertIn("--dry-run", active)
         self.assertLess(active.index("--dry-run"), active.index("adapt_sukisu_susfs.py"))
         self.assertNotIn("|| true", active)
@@ -260,7 +284,8 @@ class SharedIntegrationContractTests(unittest.TestCase):
             self.assertIn("test -s " + artifact, script)
         self.assertIn("out/drivers/kernelsu/.ksu_main.o.cmd", script)
         self.assertIn("out/drivers/kernelsu/core/.init.o.cmd", script)
-        self.assertIn("-DKSU_VERSION=$SUKISU_CI_VERSION_CODE([[:space:]]|$)", script)
+        self.assertIn('CI_VERSION="${SUKISU_CI_VERSION_CODE:-${KSUVER:-}}"', script)
+        self.assertIn("-DKSU_VERSION=$CI_VERSION([[:space:]]|$)", script)
 
 
 if __name__ == "__main__":
