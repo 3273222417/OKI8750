@@ -132,8 +132,8 @@ class WorkflowIntegrationTests(unittest.TestCase):
         self.assertIn("manager-ci", read("scripts/setup_sukisu.sh"))
         self.assertIn("SukiSU-Nova-Manager-", "\n".join(step.get("with", {}).get("name", "") for step in build["steps"]))
         upload_names = [step.get("with", {}).get("name", "") for step in build["steps"]]
-        self.assertIn("susfs-latest", upload_names)
-        self.assertIn("nomount-latest", upload_names)
+        self.assertIn("${{ steps.companions.outputs.susfs_artifact_name }}", upload_names)
+        self.assertIn("${{ steps.companions.outputs.nomount_artifact_name }}", upload_names)
 
     def test_susfs_companion_comes_from_successful_ci_artifact(self):
         script = read("scripts/fetch_companion_modules.sh")
@@ -146,6 +146,9 @@ class WorkflowIntegrationTests(unittest.TestCase):
         self.assertIn("SUSFS_MODULE_BRANCH", env)
         self.assertIn("SUSFS_MODULE_ARTIFACT_PREFIX", env)
         self.assertNotIn("get_latest_release_asset 'sidex15/susfs4ksu-module'", script)
+        self.assertIn('module_prop_value "$module_prop" version', script)
+        self.assertIn('output="${label}-${version}.zip"', script)
+        self.assertIn('write_output "${label}_artifact_name"', script)
 
     def test_oki_689_nova_cache_wraps_compiler(self):
         workflow = next(w for p, w in self.workflows if p.name == "fastbuild_6.6.89.yml")

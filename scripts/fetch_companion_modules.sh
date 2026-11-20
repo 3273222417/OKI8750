@@ -18,27 +18,62 @@ elif [[ -n "${GH_TOKEN:-}" ]]; then
 fi
 
 get_latest_release_asset() {
-  local repo="$1" pattern="$2" output="$3" label="$4"
+  local repo="$1" pattern="$2" label="$3"
   local json tag url
   json="$(curl -fsSL --retry 4 --retry-delay 3 --retry-all-errors \
     "${AUTH_ARGS[@]}" "https://api.github.com/repos/$repo/releases/latest")"
   tag="$(jq -r '.tag_name // empty' <<<"$json")"
   url="$(jq -r --arg pattern "$pattern" '[.assets[]? | select(.name | test($pattern; "i")) | .browser_download_url][0] // empty' <<<"$json")"
   [[ -n "$url" && "$url" != null ]] || { echo "No $label asset in $repo release $tag" >&2; return 1; }
-  local file="$OUT/$output"
-  curl -fsSL --retry 4 --retry-delay 3 --retry-all-errors -o "$file" "$url"
-  unzip -t "$file" >/dev/null
+  local source_file="$OUT/.${label}-source.zip"
+  curl -fsSL --retry 4 --retry-delay 3 --retry-all-errors -o "$source_file" "$url"
+  unzip -t "$source_file" >/dev/null
+  local version
+  version="$(module_prop_value_from_zip "$source_file" version || true)"
+  version="${version:-$tag}"
+  version="$(safe_version "$version")"
+  local output="${label}-${version}.zip"
+  mv -- "$source_file" "$OUT/$output"
   printf '%s=%s\n' "${label^^}_RELEASE" "$tag" >> "$OUT/companion-source.txt"
-  printf '%s=%s\n' "${label^^}_FILE" "$(basename "$file")" >> "$OUT/companion-source.txt"
+  printf '%s=%s\n' "${label^^}_VERSION" "$version" >> "$OUT/companion-source.txt"
+  printf '%s=%s\n' "${label^^}_FILE" "$output" >> "$OUT/companion-source.txt"
   printf '%s=%s\n' "${label^^}__SOURCE_ASSET" "$(basename "$url")" >> "$OUT/companion-source.txt"
+  write_output "${label}_version" "$version"
+  write_output "${label}_file" "$output"
+  write_output "${label}_artifact_name" "${label}-${version}"
+}
+
+write_output() {
+  if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+    printf '%s=%s\n' "$1" "$2" >> "$GITHUB_OUTPUT"
+  fi
+}
+
+safe_version() {
+  local value="$1"
+  value="$(printf '%s' "$value" | sed -E 's/[^A-Za-z0-9._+()-]+/-/g; s/^-+//; s/-+$//')"
+  [[ -n "$value" ]] || { echo 'module version is empty after sanitization' >&2; return 1; }
+  printf '%s' "$value"
+}
+
+module_prop_value() {
+  local prop="$1" key="$2"
+  awk -F= -v key="$key" '$1 == key {sub(/\r$/, "", $2); print $2; exit}' "$prop"
+}
+
+module_prop_value_from_zip() {
+  local zip="$1" key="$2" entry
+  entry="$(unzip -Z1 "$zip" | awk '$0 ~ /(^|\/)module\.prop$/ {print; exit}')"
+  [[ -n "$entry" ]] || return 1
+  unzip -p "$zip" "$entry" | awk -F= -v key="$key" '$1 == key {sub(/\r$/, "", $2); print $2; exit}'
 }
 
 # SUSFS's upstream module is produced by its GitHub Actions workflow. Use the
 # newest successful artifact on the module branch, rather than a Release asset.
 get_latest_ci_module() {
-  local repo="$1" workflow="$2" branch="$3" prefix="$4" output="$5" label="$6"
+  local repo="$1" workflow="$2" branch="$3" prefix="$4" label="$5"
   local runs run_id run_created run_sha artifacts artifact_row artifact_id artifact_name artifact_url
-  local tmp module_prop module_root
+  local tmp module_prop module_root version output
   runs="$(curl -fsSL --retry 4 --retry-delay 3 --retry-all-errors \
     "${AUTH_ARGS[@]}" "https://api.github.com/repos/$repo/actions/workflows/$workflow/runs?status=success&per_page=50")"
   while IFS=$'\t' read -r run_id run_created run_sha; do
@@ -56,13 +91,21 @@ get_latest_ci_module() {
     module_prop="$(find "$tmp/extracted" -type f -name module.prop -print -quit)"
     [[ -n "$module_prop" ]] || { rm -rf "$tmp"; trap - RETURN; continue; }
     module_root="${module_prop%/module.prop}"
+    version="$(module_prop_value "$module_prop" version || true)"
+    version="${version:-CI-${run_sha:0:7}}"
+    version="$(safe_version "$version")"
+    output="${label}-${version}.zip"
     (cd "$module_root" && zip -qr "$OUT/$output" .)
     unzip -t "$OUT/$output" >/dev/null
     printf '%s=%s\n' "${label^^}_CI_RUN" "$run_id" >> "$OUT/companion-source.txt"
     printf '%s=%s\n' "${label^^}_CI_CREATED" "$run_created" >> "$OUT/companion-source.txt"
     printf '%s=%s\n' "${label^^}_CI_HEAD" "$run_sha" >> "$OUT/companion-source.txt"
     printf '%s=%s\n' "${label^^}_CI_ARTIFACT" "$artifact_name" >> "$OUT/companion-source.txt"
+    printf '%s=%s\n' "${label^^}_VERSION" "$version" >> "$OUT/companion-source.txt"
     printf '%s=%s\n' "${label^^}_CI_FILE" "$output" >> "$OUT/companion-source.txt"
+    write_output "${label}_version" "$version"
+    write_output "${label}_file" "$output"
+    write_output "${label}_artifact_name" "${label}-${version}"
     rm -rf "$tmp"
     trap - RETURN
     return 0
@@ -72,7 +115,7 @@ get_latest_ci_module() {
 }
 
 get_latest_ci_module "$SUSFS_MODULE_REPOSITORY" "$SUSFS_MODULE_WORKFLOW" \
-  "$SUSFS_MODULE_BRANCH" "$SUSFS_MODULE_ARTIFACT_PREFIX" susfs-latest.zip susfs
+  "$SUSFS_MODULE_BRANCH" "$SUSFS_MODULE_ARTIFACT_PREFIX" susfs
 if [[ "$NOMOUNT" == true ]]; then
-  get_latest_release_asset 'maxsteeel/nomount' '[.]zip$' nomount-latest.zip nomount
+  get_latest_release_asset 'maxsteeel/nomount' '[.]zip$' nomount
 fi

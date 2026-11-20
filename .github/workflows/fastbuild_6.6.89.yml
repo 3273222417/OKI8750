@@ -770,6 +770,7 @@ jobs:
 
       - name: 获取配套模块
         if: ${{ success() && inputs.ksu_type == 'sukisu' }}
+        id: companions
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -798,16 +799,16 @@ jobs:
         if: ${{ success() && inputs.ksu_type == 'sukisu' }}
         uses: actions/upload-artifact@v7
         with:
-          name: susfs-latest
-          path: kernel_workspace/companion-artifacts/susfs-latest.zip
+          name: ${{ steps.companions.outputs.susfs_artifact_name }}
+          path: kernel_workspace/companion-artifacts/${{ steps.companions.outputs.susfs_file }}
           if-no-files-found: error
 
       - name: 上传 NoMount 模块
         if: ${{ success() && inputs.ksu_type == 'sukisu' && inputs.use_nomount }}
         uses: actions/upload-artifact@v7
         with:
-          name: nomount-latest
-          path: kernel_workspace/companion-artifacts/nomount-latest.zip
+          name: ${{ steps.companions.outputs.nomount_artifact_name }}
+          path: kernel_workspace/companion-artifacts/${{ steps.companions.outputs.nomount_file }}
           if-no-files-found: error
 
   release:
