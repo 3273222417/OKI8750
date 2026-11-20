@@ -25,7 +25,9 @@
 | `baseband_guard` | `false` |
 | 其他选项 | 保持默认 |
 
-`sukisu` 从 [SukiSU-Nova 官方仓库](https://github.com/SukiSU-Nova/SukiSU-Nova)检出 [固定提交](scripts/sukisu_sources.env)：启用 SUSFS 时使用 `builtin`，未启用时使用 `main`。`bakasu` 仍独立使用 BakaSU。Nova 构建先安装 UAPI 头文件，再编译其 preinit runner 和内核。本地 Linux 可运行 `bash local/builder_6.6.89.sh`，在 KSU 分支提示中选 `y`。
+`sukisu` 从 [SukiSU-Nova 官方 Forgejo](https://git.zako.shirkneko.top:20004/shirkneko/SukiSU)拉取与 **Manager CI 35042** 对齐的[固定提交](scripts/sukisu_sources.env)：不开 SUSFS 时编译 `main` 的 `81bbac83`，开启时编译独立的 `builtin` 提交 `8c6c52a0`。两种构建都从已固定的 `main` 提交计算版本号，并在编译后核对实际版本。上游 `manager-ci` 发布是滚动更新的，下载 [CI 管理器](https://git.zako.shirkneko.top:20004/shirkneko/SukiSU/releases/tag/manager-ci)时请核对 APK 文件名中的 `35042`；后续 CI 版本不会自动改变本仓库的源码。
+
+`bakasu` 仍单独使用 BakaSU。Nova 构建先安装 UAPI 头文件，再编译其 preinit runner 和内核。本地 Linux 可运行 `bash local/builder_6.6.89.sh`，在 KSU 分支提示中选 `y`。
 
 成功运行的 **Artifacts** 包含 `AnyKernel3_SukiSU-Nova_*.zip`；`oki-6.6.89-nova-build-evidence` 保留实际内核配置、源码版本、编译日志和 SHA-256。编译成功不等于已经在真机验证；刷入前确认机型、系统版本并备份原始启动镜像。
 

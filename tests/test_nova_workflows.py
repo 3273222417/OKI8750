@@ -131,6 +131,13 @@ class WorkflowIntegrationTests(unittest.TestCase):
         self.assertIn(workflow["env"]["OKI_COMMIT"], local)
         self.assertIn("apply_compression_6.6.89.sh", local)
 
+    def test_release_notes_link_to_nova_ci_channel(self):
+        ci_url = re.search(r"^SUKISU_CI_RELEASE_URL=(.+)$", read("scripts/sukisu_sources.env"), re.M)[1]
+        for path, workflow in self.workflows:
+            with self.subTest(workflow=path.name):
+                scripts = [step.get("run", "") for step in workflow["jobs"]["release"]["steps"]]
+                self.assertTrue(any(ci_url in script for script in scripts))
+
 
 class LocalIntegrationTests(unittest.TestCase):
     @classmethod
@@ -194,7 +201,9 @@ class SharedIntegrationContractTests(unittest.TestCase):
 
     def test_pinned_official_sources_and_full_history_version(self):
         env = dict(re.findall(r"^([A-Z_]+)=([^\n]+)$", read("scripts/sukisu_sources.env"), re.M))
-        self.assertEqual("https://github.com/SukiSU-Nova/SukiSU-Nova.git", env["SUKISU_REPOSITORY"])
+        self.assertEqual("https://git.zako.shirkneko.top:20004/shirkneko/SukiSU.git", env["SUKISU_REPOSITORY"])
+        self.assertEqual(env["SUKISU_REPOSITORY"].removesuffix(".git") + "/releases/tag/manager-ci", env["SUKISU_CI_RELEASE_URL"])
+        self.assertRegex(env["SUKISU_CI_VERSION_CODE"], r"^[1-9][0-9]+$")
         for key in ("SUKISU_MAIN_COMMIT", "SUKISU_BUILTIN_COMMIT", "SUKISU_SUSFS_COMMIT"):
             self.assertRegex(env[key], r"^[0-9a-f]{40}$")
         self.assertEqual("30000", env["SUKISU_VERSION_BASE"])
@@ -204,6 +213,8 @@ class SharedIntegrationContractTests(unittest.TestCase):
         self.assertIn('false) BRANCH=main; COMMIT="$SUKISU_MAIN_COMMIT"', setup)
         self.assertIn('rev-list --count "$SUKISU_MAIN_COMMIT"', setup)
         self.assertIn("rev-parse --is-shallow-repository", setup)
+        self.assertIn('"$VERSION" != "$SUKISU_CI_VERSION_CODE"', setup)
+        self.assertIn('checkout --detach "$COMMIT"', setup)
         self.assertNotRegex(setup, r"(?m)^\s*curl\b")
 
     def test_susfs_patch_must_succeed_before_adapter(self):
@@ -223,6 +234,9 @@ class SharedIntegrationContractTests(unittest.TestCase):
             self.assertIn(flag, script)
         for artifact in ("out/usr/include/linux/unistd.h", "out/drivers/kernelsu/preinit/runner.elf", "out/arch/arm64/boot/Image"):
             self.assertIn("test -s " + artifact, script)
+        self.assertIn("out/drivers/kernelsu/.ksu_main.o.cmd", script)
+        self.assertIn("out/drivers/kernelsu/core/.init.o.cmd", script)
+        self.assertIn("-DKSU_VERSION=$SUKISU_CI_VERSION_CODE([[:space:]]|$)", script)
 
 
 if __name__ == "__main__":
