@@ -100,8 +100,8 @@ printf 'source=%s\nbranch=%s\ncommit=%s\nversion_source=%s\nKSUVER=%s\nci_releas
   "$SUKISU_REPOSITORY" "$BRANCH" "$COMMIT" "$MAIN_COMMIT" "$VERSION" "$SUKISU_CI_RELEASE_URL" "$manager_target" "$manager_version" "$manager_name" \
   > "$WORKSPACE/sukisu-source.txt"
 if [[ -n "${GITHUB_ENV:-}" ]]; then
-  printf 'KSUVER=%s\nSUKISU_CI_VERSION_CODE=%s\nSUKISU_MAIN_COMMIT=%s\nSUKISU_BUILTIN_COMMIT=%s\nSUKISU_COMMIT=%s\nSUKISU_BRANCH=%s\n' \
-    "$VERSION" "$VERSION" "$MAIN_COMMIT" "$BUILTIN_COMMIT" "$COMMIT" "$BRANCH" >> "$GITHUB_ENV"
+  printf 'KSUVER=%s\nSUKISU_CI_VERSION_CODE=%s\nSUKISU_MAIN_COMMIT=%s\nSUKISU_BUILTIN_COMMIT=%s\nSUKISU_COMMIT=%s\nSUKISU_BRANCH=%s\nKSU_BUILD_REF=%s\n' \
+    "$VERSION" "$VERSION" "$MAIN_COMMIT" "$BUILTIN_COMMIT" "$COMMIT" "$BRANCH" "$BRANCH" >> "$GITHUB_ENV"
 fi
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   printf 'ksuver=%s\nmanager_version=%s\nmain_commit=%s\nbuiltin_commit=%s\n' \
