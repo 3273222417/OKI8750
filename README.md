@@ -28,6 +28,8 @@
 
 `sukisu` 每次构建都会从 [SukiSU-Nova 官方 Forgejo](https://git.zako.shirkneko.top:20004/shirkneko/SukiSU)读取 `main` 当前提交，并轮询滚动的 `manager-ci`，直到 APK versionCode 与该提交的版本计数一致；开启 SUSFS 时使用同一轮的 `builtin` 提交。源码 SHA、Manager APK、内核版本不会写死在仓库中。流程会上传当前 Manager APK、SUSFS 模块和（默认开启的）NoMount 模块，并把实际来源写入 `sukisu-source.txt`。
 
+Nova 管理器显示的完整版本固定为 `v$(VERSION_TAG)-by.贝利亚大王`，例如 `v3.0.0-by.贝利亚大王`；数字版号仍跟随当前 CI versionCode。
+
 `bakasu` 仍单独使用 BakaSU。Nova 构建先安装 UAPI 头文件，再编译其 preinit runner 和内核。本地 Linux 可运行 `bash local/builder_6.6.89.sh`，在 KSU 分支提示中选 `y`。
 
 成功运行的 **Artifacts** 包含 `AnyKernel3_SukiSU-Nova_*.zip`、`SukiSU-Nova-Manager-*`、版本化的 `susfs-*`、`nomount-*`、`zram-lz4-1.10.0-zstd-1.5.7-*` 和 `oki-6.6.89-nova-build-evidence`。其中 `zram-lz4-1.10.0-zstd-1.5.7-*` 搭载本次 6.6.89 构建实际生成的 `zram.ko`/`zsmalloc.ko`，与旧的 5.15 `zram.zip` 不混用；Nova 编译使用独立的 ccache 缓存。编译成功不等于已经在真机验证；刷入前确认机型、系统版本并备份原始启动镜像。

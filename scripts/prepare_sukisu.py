@@ -41,19 +41,12 @@ def prepare(workspace, susfs, version, count, ref, tag):
         source, hits = re.subn(rf"^{key}\s*:=.*$", f"{key} := {value}", source, flags=re.M)
         if hits != 1:
             raise ValueError(f"expected one {key} assignment in {build}, found {hits}")
-    # builtin and main currently ship slightly different Kbuild definitions;
-    # normalize both so detached CI checkouts never render the literal HEAD.
-    branch_line = "git_branch = $(if $(strip $(KSU_BUILD_REF)),$(KSU_BUILD_REF),$(shell cd $(KSU_SRC) && $(GIT_BIN) rev-parse --abbrev-ref HEAD 2>/dev/null))"
-    source, hits = re.subn(r"^git_branch\s*[:=].*$", branch_line, source, flags=re.M)
-    if hits != 1:
-        raise ValueError(f"expected one git_branch assignment in {build}, found {hits}")
-    # Detached CI checkouts make git report the literal branch name `HEAD`.
-    # Kbuild already honors KSU_BUILD_REF for this display-only suffix. It
-    # must be defined before KSU_VERSION_FULL's := expansion is evaluated.
-    build_ref = "builtin" if susfs else "main"
+    # Use stable branding instead of exposing detached-checkout metadata such
+    # as @HEAD/@builtin in the manager's full-version display.
+    full_version_line = "KSU_VERSION_FULL := v$(VERSION_TAG)-by.贝利亚大王"
     source, hits = re.subn(
-        r"^(KSU_VERSION_FULL\s*:=)",
-        f"KSU_BUILD_REF ?= {build_ref}\n\\1",
+        r"^KSU_VERSION_FULL\s*:=.*$",
+        full_version_line,
         source,
         flags=re.M,
     )

@@ -291,10 +291,8 @@ class SharedIntegrationContractTests(unittest.TestCase):
         self.assertIn('checkout --detach "$COMMIT"', setup)
         self.assertIn('manager-artifacts', setup)
         self.assertIn('SUKISU_CI_API', read("scripts/sukisu_sources.env"))
-        self.assertIn('KSU_BUILD_REF=%s', setup)
-        self.assertIn('KSU_BUILD_REF ?=', read("scripts/prepare_sukisu.py"))
-        self.assertIn('git_branch = $(if $(strip $(KSU_BUILD_REF))', read("scripts/prepare_sukisu.py"))
-        self.assertIn('before KSU_VERSION_FULL', read("scripts/prepare_sukisu.py"))
+        self.assertNotIn('KSU_BUILD_REF=%s', setup)
+        self.assertIn('KSU_VERSION_FULL := v$(VERSION_TAG)-by.贝利亚大王', read("scripts/prepare_sukisu.py"))
 
     def test_susfs_patch_must_succeed_before_adapter(self):
         script = read("scripts/apply_sukisu_susfs.sh")
