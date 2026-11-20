@@ -7,6 +7,8 @@ OUT="$(mkdir -p -- "${1:?output directory required}" && cd -- "$1" && pwd)"
 NOMOUNT="${2:?true or false required}"
 case "$NOMOUNT" in true|false) ;; *) exit 1 ;; esac
 mkdir -p "$OUT"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/sukisu_sources.env"
 
 AUTH_ARGS=()
 if [[ -n "${GITHUB_TOKEN:-}" ]]; then
@@ -15,7 +17,7 @@ elif [[ -n "${GH_TOKEN:-}" ]]; then
   AUTH_ARGS=(-H "Authorization: Bearer $GH_TOKEN")
 fi
 
-get_release_asset() {
+get_latest_release_asset() {
   local repo="$1" pattern="$2" output="$3" label="$4"
   local json tag url
   json="$(curl -fsSL --retry 4 --retry-delay 3 --retry-all-errors \
@@ -31,7 +33,46 @@ get_release_asset() {
   printf '%s=%s\n' "${label^^}__SOURCE_ASSET" "$(basename "$url")" >> "$OUT/companion-source.txt"
 }
 
-get_release_asset 'sidex15/susfs4ksu-module' 'ksu_module_susfs.*[.]zip$' susfs-latest.zip susfs
+# SUSFS's upstream module is produced by its GitHub Actions workflow. Use the
+# newest successful artifact on the module branch, rather than a Release asset.
+get_latest_ci_module() {
+  local repo="$1" workflow="$2" branch="$3" prefix="$4" output="$5" label="$6"
+  local runs run_id run_created run_sha artifacts artifact_row artifact_id artifact_name artifact_url
+  local tmp module_prop module_root
+  runs="$(curl -fsSL --retry 4 --retry-delay 3 --retry-all-errors \
+    "${AUTH_ARGS[@]}" "https://api.github.com/repos/$repo/actions/workflows/$workflow/runs?status=success&per_page=50")"
+  while IFS=$'\t' read -r run_id run_created run_sha; do
+    [[ -n "$run_id" ]] || continue
+    artifacts="$(curl -fsSL --retry 4 --retry-delay 3 --retry-all-errors \
+      "${AUTH_ARGS[@]}" "https://api.github.com/repos/$repo/actions/runs/$run_id/artifacts?per_page=100")"
+    artifact_row="$(jq -r --arg prefix "$prefix" '[.artifacts[]? | select(.expired == false and (.name | startswith($prefix)))] | sort_by(.created_at) | reverse | .[0] | if . then [.id, .name, .archive_download_url] | @tsv else empty end' <<<"$artifacts")"
+    [[ -n "$artifact_row" ]] || continue
+    IFS=$'\t' read -r artifact_id artifact_name artifact_url <<< "$artifact_row"
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "$tmp"' RETURN
+    curl -fsSL --retry 4 --retry-delay 3 --retry-all-errors \
+      "${AUTH_ARGS[@]}" -o "$tmp/artifact.zip" "$artifact_url"
+    unzip -oq "$tmp/artifact.zip" -d "$tmp/extracted"
+    module_prop="$(find "$tmp/extracted" -type f -name module.prop -print -quit)"
+    [[ -n "$module_prop" ]] || { rm -rf "$tmp"; trap - RETURN; continue; }
+    module_root="${module_prop%/module.prop}"
+    (cd "$module_root" && zip -qr "$OUT/$output" .)
+    unzip -t "$OUT/$output" >/dev/null
+    printf '%s=%s\n' "${label^^}_CI_RUN" "$run_id" >> "$OUT/companion-source.txt"
+    printf '%s=%s\n' "${label^^}_CI_CREATED" "$run_created" >> "$OUT/companion-source.txt"
+    printf '%s=%s\n' "${label^^}_CI_HEAD" "$run_sha" >> "$OUT/companion-source.txt"
+    printf '%s=%s\n' "${label^^}_CI_ARTIFACT" "$artifact_name" >> "$OUT/companion-source.txt"
+    printf '%s=%s\n' "${label^^}_CI_FILE" "$output" >> "$OUT/companion-source.txt"
+    rm -rf "$tmp"
+    trap - RETURN
+    return 0
+  done < <(jq -r --arg branch "$branch" '[.workflow_runs[]? | select(.status == "completed" and .conclusion == "success" and .head_branch == $branch)] | sort_by(.created_at) | reverse | .[] | [.id, .created_at, .head_sha] | @tsv' <<<"$runs")
+  echo "No successful CI module artifact found for $repo/$workflow branch $branch" >&2
+  return 1
+}
+
+get_latest_ci_module "$SUSFS_MODULE_REPOSITORY" "$SUSFS_MODULE_WORKFLOW" \
+  "$SUSFS_MODULE_BRANCH" "$SUSFS_MODULE_ARTIFACT_PREFIX" susfs-latest.zip susfs
 if [[ "$NOMOUNT" == true ]]; then
-  get_release_asset 'maxsteeel/nomount' '[.]zip$' nomount-latest.zip nomount
+  get_latest_release_asset 'maxsteeel/nomount' '[.]zip$' nomount-latest.zip nomount
 fi

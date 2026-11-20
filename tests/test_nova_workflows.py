@@ -135,6 +135,18 @@ class WorkflowIntegrationTests(unittest.TestCase):
         self.assertIn("susfs-latest", upload_names)
         self.assertIn("nomount-latest", upload_names)
 
+    def test_susfs_companion_comes_from_successful_ci_artifact(self):
+        script = read("scripts/fetch_companion_modules.sh")
+        env = read("scripts/sukisu_sources.env")
+        self.assertIn("actions/workflows/$workflow/runs", script)
+        self.assertIn("actions/runs/$run_id/artifacts", script)
+        self.assertIn("get_latest_ci_module", script)
+        self.assertIn("SUSFS_MODULE_REPOSITORY", env)
+        self.assertIn("SUSFS_MODULE_WORKFLOW", env)
+        self.assertIn("SUSFS_MODULE_BRANCH", env)
+        self.assertIn("SUSFS_MODULE_ARTIFACT_PREFIX", env)
+        self.assertNotIn("get_latest_release_asset 'sidex15/susfs4ksu-module'", script)
+
     def test_oki_689_nova_cache_wraps_compiler(self):
         workflow = next(w for p, w in self.workflows if p.name == "fastbuild_6.6.89.yml")
         runs = "\n".join(step.get("run", "") for step in workflow["jobs"]["build"]["steps"])
