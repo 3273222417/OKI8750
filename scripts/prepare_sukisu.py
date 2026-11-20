@@ -42,9 +42,17 @@ def prepare(workspace, susfs, version, count, ref, tag):
         if hits != 1:
             raise ValueError(f"expected one {key} assignment in {build}, found {hits}")
     # Detached CI checkouts make git report the literal branch name `HEAD`.
-    # Kbuild already honors KSU_BUILD_REF for this display-only suffix; keep
-    # the source checkout detached while making the full version explicit.
-    source += "\nKSU_BUILD_REF ?= " + ("builtin" if susfs else "main") + "\n"
+    # Kbuild already honors KSU_BUILD_REF for this display-only suffix. It
+    # must be defined before KSU_VERSION_FULL's := expansion is evaluated.
+    build_ref = "builtin" if susfs else "main"
+    source, hits = re.subn(
+        r"^(KSU_VERSION_FULL\s*:=)",
+        f"KSU_BUILD_REF ?= {build_ref}\n\\1",
+        source,
+        flags=re.M,
+    )
+    if hits != 1:
+        raise ValueError(f"expected one KSU_VERSION_FULL assignment in {build}, found {hits}")
     for key in ("KSU_RELEASE_VER", "RELEASE_COMMITS", "KSU_GITHUB_VER", "GITHUB_COMMITS"):
         source = re.sub(rf"^{key}\s*:=.*$", f"{key} :=", source, flags=re.M)
     source = "\n".join(line for line in source.split("\n") if "fetch --unshallow" not in line)
