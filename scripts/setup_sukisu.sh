@@ -43,7 +43,7 @@ for attempt in $(seq 1 "$SUKISU_CI_MAX_ATTEMPTS"); do
       manager_target="$(git ls-remote "$SUKISU_REPOSITORY" \
         refs/heads/main 2>/dev/null | awk 'NR==1 {print $1}')"
     fi
-    assets="$(jq -r '[.assets[]? | select(.name | test("release[.]apk$"; "i")) | select(.name | test("debug|spoofed"; "i") | not) | [.name, .browser_download_url] | @tsv] | sort_by(if (.[0] | test("arm64-v8a"; "i")) then 0 elif (.[0] | test("universal"; "i")) then 1 else 2 end) | .[]' <<<"$release_json")"
+    assets="$(jq -r '[.assets[]? | select(.name | test("release[.]apk$"; "i")) | select(.name | test("debug|spoofed"; "i") | not)] | sort_by(if (.name | test("arm64-v8a"; "i")) then 0 elif (.name | test("universal"; "i")) then 1 else 2 end) | .[] | [.name, .browser_download_url] | @tsv' <<<"$release_json")"
     first_name="$(head -n 1 <<<"$assets" | cut -f1)"
     if [[ "$first_name" =~ _([0-9]+)(-([a-z0-9-]+))?-release[.]apk$ ]]; then
       manager_version="${BASH_REMATCH[1]}"
