@@ -7,6 +7,8 @@ Dependency: PyYAML. These checks validate wiring, not a full kernel build.
 import ast
 from pathlib import Path
 import re
+import subprocess
+import sys
 import unittest
 
 import yaml
@@ -284,15 +286,55 @@ class SharedIntegrationContractTests(unittest.TestCase):
         setup = read("scripts/setup_sukisu.sh")
         self.assertIn('true) BRANCH=builtin', setup)
         self.assertIn('false) BRANCH=main', setup)
-        self.assertIn('rev-list --count "$MAIN_COMMIT"', setup)
+        self.assertIn('rev-list --count "$manager_target"', setup)
         self.assertIn("rev-parse --is-shallow-repository", setup)
-        self.assertIn('manager_target" == "$MAIN_COMMIT"', setup)
-        self.assertIn('manager_version" == "$VERSION"', setup)
+        self.assertIn('manager_version" == "$target_version"', setup)
         self.assertIn('checkout --detach "$COMMIT"', setup)
         self.assertIn('manager-artifacts', setup)
         self.assertIn('SUKISU_CI_API', read("scripts/sukisu_sources.env"))
+        self.assertIn('SUKISU_CI_FALLBACK_RELEASE_URL', read("scripts/sukisu_sources.env"))
         self.assertNotIn('KSU_BUILD_REF=%s', setup)
         self.assertIn('KSU_VERSION_FULL := v$(VERSION_TAG)-by.贝利亚大王', read("scripts/prepare_sukisu.py"))
+
+    def test_dynamic_ci_accepts_metadata_only_release_and_previous_main_commit(self):
+        setup = read("scripts/setup_sukisu.sh")
+        helper = read("scripts/extract_manager_assets.py")
+        self.assertIn('manager_release_url="$SUKISU_CI_FALLBACK_RELEASE_URL"', setup)
+        self.assertIn('if [[ -z "$assets" ]]', setup)
+        self.assertIn('/-/releases/download/', helper)
+        self.assertIn('merge-base --is-ancestor', setup)
+        self.assertIn('target_version=$((SUKISU_VERSION_BASE + target_count + SUKISU_VERSION_OFFSET))', setup)
+        self.assertIn('manager_version" == "$target_version"', setup)
+        self.assertIn('MAIN_COMMIT="$manager_target"', setup)
+        self.assertIn('COMMIT="$MAIN_COMMIT"', setup)
+        self.assertIn('extract_manager_assets.py', setup)
+        self.assertIn('refresh_main() {', setup)
+        self.assertNotIn('git ls-remote', setup)
+
+    def test_manager_asset_parser_prefers_arm64_and_rejects_debug_links(self):
+        page = r'''<script type="application/json">
+        {"path":"/shirkneko/sukisu-result/-/releases/download/manager-ci/SukiSU_Nova_v3.0.0-r1_35058-arm64-v8a-release.apk"}
+        {"path":"/shirkneko/sukisu-result/-/releases/download/manager-ci/SukiSU_Nova_v3.0.0-r1_35059-x86_64-release.apk"}
+        {"path":"/shirkneko/sukisu-result/-/releases/download/manager-ci/SukiSU_Nova_v3.0.0-r1_35059-arm64-v8a-debug.apk"}
+        {"path":"/shirkneko/sukisu-result/-/releases/download/manager-ci/SukiSU_Nova_v3.0.0-r1_35059-arm64-v8a-release.apk"}
+        {"path":"/shirkneko/sukisu-result/-/releases/download/manager-ci/SukiSU_Nova_v3.0.0-r1_35059-universal-release.apk"}
+        {"path":"https://example.invalid/other/-/releases/download/manager-ci/fake_35059-arm64-v8a-release.apk"}
+        </script>'''
+        helper = ROOT / "scripts/extract_manager_assets.py"
+        result = subprocess.run(
+            [sys.executable, str(helper), "https://cnb.cool/shirkneko/sukisu-result/-/releases/tag/manager-ci", "35059"],
+            input=page,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        self.assertEqual(
+            [
+                "SukiSU_Nova_v3.0.0-r1_35059-arm64-v8a-release.apk\thttps://cnb.cool/shirkneko/sukisu-result/-/releases/download/manager-ci/SukiSU_Nova_v3.0.0-r1_35059-arm64-v8a-release.apk",
+                "SukiSU_Nova_v3.0.0-r1_35059-universal-release.apk\thttps://cnb.cool/shirkneko/sukisu-result/-/releases/download/manager-ci/SukiSU_Nova_v3.0.0-r1_35059-universal-release.apk",
+            ],
+            result.stdout.splitlines(),
+        )
 
     def test_susfs_patch_must_succeed_before_adapter(self):
         script = read("scripts/apply_sukisu_susfs.sh")
