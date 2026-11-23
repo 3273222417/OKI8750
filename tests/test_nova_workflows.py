@@ -300,6 +300,11 @@ class SharedIntegrationContractTests(unittest.TestCase):
         setup = read("scripts/setup_sukisu.sh")
         helper = read("scripts/extract_manager_assets.py")
         self.assertIn('manager_release_url="$SUKISU_CI_FALLBACK_RELEASE_URL"', setup)
+        env = dict(re.findall(r"^([A-Z_]+)=([^\n]+)$", read("scripts/sukisu_sources.env"), re.M))
+        self.assertEqual(
+            "https://cnb.cool/shirkneko/sukisu-release/-/releases/tag/manager-ci",
+            env["SUKISU_CI_FALLBACK_RELEASE_URL"],
+        )
         self.assertIn('if [[ -z "$assets" ]]', setup)
         self.assertIn('/-/releases/download/', helper)
         self.assertIn('merge-base --is-ancestor', setup)
