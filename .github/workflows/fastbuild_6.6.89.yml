@@ -897,7 +897,7 @@ jobs:
           - Re-Kernel支持：${{ github.event.inputs.rekernel_enable }}
           - 内核级基带保护支持：${{ github.event.inputs.baseband_guard }}
           - BakaSU管理器下载：[BakaSU_CI](https://github.com/cctv18/BakaSU_CI/releases)
-          - SukiSU-Nova 管理器：[官方 CI 发布页](https://git.zako.shirkneko.top:20004/shirkneko/SukiSU/releases/tag/manager-ci)（滚动更新，请核对 APK 版本）
+          - SukiSU-Nova 管理器：[官方 CI 发布页](https://cnb.cool/sukisu-nova/Release/-/tree/manager-ci)（滚动更新，请核对 APK 版本）
           - KernelSU Next管理器下载：[KernelSU-Next](https://github.com/KernelSU-Next/KernelSU-Next/releases)
           - KSU原版管理器下载：[KernelSU](https://github.com/tiann/KernelSU/releases)
           

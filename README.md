@@ -26,7 +26,7 @@
 | `baseband_guard` | `false` |
 | 其他选项 | 保持默认 |
 
-`sukisu` 每次构建都会刷新 [SukiSU-Nova 官方 Forgejo](https://git.zako.shirkneko.top:20004/shirkneko/SukiSU) 的 `main`，并轮询滚动的 `manager-ci` 元数据及其 CNB APK 页面。只有当 release target 是已刷新 `main` 历史中的提交，且 APK versionCode 与该 target 的完整提交计数一致时才会继续；源码 checkout、Manager APK 和内核版本均绑定到这个 target。因此 main 在 CI 发布期间前进时，会使用最新已发布且匹配的 CI target，而不会把新 Manager 错配到不同源码；源码 SHA、Manager 版本和 APK 地址都不会写死。开启 SUSFS 时使用当前 `builtin` 分支提交。流程会上传当前 Manager APK、SUSFS 模块和（默认开启的）NoMount 模块，并把实际来源写入 `sukisu-source.txt`。
+`sukisu` 每次构建都会刷新 [SukiSU-Nova 官方 GitHub](https://github.com/SukiSU-Nova/SukiSU-Nova) 的 `main`，并读取官方 CNB `manager-ci` manifest 及 APK。只有当 manifest 的 target commit 能在官方 GitHub 或历史 CI 镜像中验证为 `main` 的祖先，且 APK versionCode 已从当前 CI 元数据解析出来时才会继续；源码 checkout、Manager APK 和内核版本均绑定到这个 target。仓库迁移期间如果 target 仍只存在于旧镜像，脚本会自动切换到该镜像，而不会把新 Manager 错配到不同源码；源码 SHA、Manager 版本和 APK 地址都会写入 `sukisu-source.txt`。开启 SUSFS 时使用同一来源的 `builtin` 分支提交。流程会上传当前 Manager APK、SUSFS 模块和（默认开启的）NoMount 模块。
 
 Nova 管理器显示的完整版本固定为 `v$(VERSION_TAG)-by.贝利亚大王`，例如 `v3.0.0-by.贝利亚大王`；数字版号仍跟随当前 CI versionCode。
 

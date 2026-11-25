@@ -276,19 +276,19 @@ class SharedIntegrationContractTests(unittest.TestCase):
 
     def test_dynamic_official_sources_and_full_history_version(self):
         env = dict(re.findall(r"^([A-Z_]+)=([^\n]+)$", read("scripts/sukisu_sources.env"), re.M))
-        self.assertEqual("https://git.zako.shirkneko.top:20004/shirkneko/SukiSU.git", env["SUKISU_REPOSITORY"])
-        self.assertEqual(env["SUKISU_REPOSITORY"].removesuffix(".git") + "/releases/tag/manager-ci", env["SUKISU_CI_RELEASE_URL"])
+        self.assertEqual("https://github.com/SukiSU-Nova/SukiSU-Nova.git", env["SUKISU_REPOSITORY"])
+        self.assertEqual("https://git.zako.shirkneko.top:20004/shirkneko/SukiSU.git", env["SUKISU_REPOSITORY_FALLBACK"])
+        self.assertEqual("https://cnb.cool/sukisu-nova/Release/-/tree/manager-ci", env["SUKISU_CI_RELEASE_URL"])
+        self.assertEqual("https://cnb.cool/sukisu-nova/Release/-/git/raw/manager-ci/manifest.json", env["SUKISU_CI_MANIFEST_URL"])
         self.assertEqual("manager-ci", env["SUKISU_CI_TAG"])
         self.assertRegex(env["SUKISU_CI_MAX_ATTEMPTS"], r"^[1-9][0-9]*$")
         self.assertRegex(env["SUKISU_CI_RETRY_SECONDS"], r"^[1-9][0-9]*$")
         self.assertEqual("30000", env["SUKISU_VERSION_BASE"])
-        self.assertEqual("996", env["SUKISU_VERSION_OFFSET"])
         setup = read("scripts/setup_sukisu.sh")
         self.assertIn('true) BRANCH=builtin', setup)
         self.assertIn('false) BRANCH=main', setup)
         self.assertIn('rev-list --count "$manager_target"', setup)
         self.assertIn("rev-parse --is-shallow-repository", setup)
-        self.assertIn('manager_version" == "$target_version"', setup)
         self.assertIn('checkout --detach "$COMMIT"', setup)
         self.assertIn('manager-artifacts', setup)
         self.assertIn('SUKISU_CI_API', read("scripts/sukisu_sources.env"))
@@ -299,35 +299,33 @@ class SharedIntegrationContractTests(unittest.TestCase):
     def test_dynamic_ci_accepts_metadata_only_release_and_previous_main_commit(self):
         setup = read("scripts/setup_sukisu.sh")
         helper = read("scripts/extract_manager_assets.py")
-        self.assertIn('manager_release_url="$SUKISU_CI_FALLBACK_RELEASE_URL"', setup)
+        self.assertIn('manager_release_url="$SUKISU_CI_RELEASE_URL"', setup)
         env = dict(re.findall(r"^([A-Z_]+)=([^\n]+)$", read("scripts/sukisu_sources.env"), re.M))
         self.assertEqual(
-            "https://cnb.cool/shirkneko/sukisu-release/-/releases/tag/manager-ci",
+            "https://cnb.cool/sukisu-nova/Release/-/tree/manager-ci",
             env["SUKISU_CI_FALLBACK_RELEASE_URL"],
         )
-        self.assertIn('if [[ -z "$assets" ]]', setup)
-        self.assertIn('/-/releases/download/', helper)
+        self.assertIn('SUKISU_CI_MANIFEST_URL', setup)
+        self.assertIn('select_target_source', setup)
+        self.assertIn('/-/git/raw/', helper)
         self.assertIn('merge-base --is-ancestor', setup)
-        self.assertIn('target_version=$((SUKISU_VERSION_BASE + target_count + SUKISU_VERSION_OFFSET))', setup)
-        self.assertIn('manager_version" == "$target_version"', setup)
         self.assertIn('MAIN_COMMIT="$manager_target"', setup)
         self.assertIn('COMMIT="$MAIN_COMMIT"', setup)
         self.assertIn('extract_manager_assets.py', setup)
         self.assertIn('refresh_main() {', setup)
-        self.assertNotIn('git ls-remote', setup)
 
     def test_manager_asset_parser_prefers_arm64_and_rejects_debug_links(self):
         page = r'''<script type="application/json">
-        {"path":"/shirkneko/sukisu-result/-/releases/download/manager-ci/SukiSU_Nova_v3.0.0-r1_35058-arm64-v8a-release.apk"}
-        {"path":"/shirkneko/sukisu-result/-/releases/download/manager-ci/SukiSU_Nova_v3.0.0-r1_35059-x86_64-release.apk"}
-        {"path":"/shirkneko/sukisu-result/-/releases/download/manager-ci/SukiSU_Nova_v3.0.0-r1_35059-arm64-v8a-debug.apk"}
-        {"path":"/shirkneko/sukisu-result/-/releases/download/manager-ci/SukiSU_Nova_v3.0.0-r1_35059-arm64-v8a-release.apk"}
-        {"path":"/shirkneko/sukisu-result/-/releases/download/manager-ci/SukiSU_Nova_v3.0.0-r1_35059-universal-release.apk"}
-        {"path":"https://example.invalid/other/-/releases/download/manager-ci/fake_35059-arm64-v8a-release.apk"}
+        {"path":"/sukisu-nova/Release/-/git/raw/manager-ci/apks/SukiSU_Nova_v3.0.0-r1_35058-arm64-v8a-release.apk"}
+        {"path":"/sukisu-nova/Release/-/git/raw/manager-ci/apks/SukiSU_Nova_v3.0.0-r1_35059-x86_64-release.apk"}
+        {"path":"/sukisu-nova/Release/-/git/raw/manager-ci/apks/SukiSU_Nova_v3.0.0-r1_35059-arm64-v8a-debug.apk"}
+        {"path":"/sukisu-nova/Release/-/git/raw/manager-ci/apks/SukiSU_Nova_v3.0.0-r1_35059-arm64-v8a-release.apk"}
+        {"path":"/sukisu-nova/Release/-/git/raw/manager-ci/apks/SukiSU_Nova_v3.0.0-r1_35059-universal-release.apk"}
+        {"path":"https://example.invalid/other/-/git/raw/manager-ci/fake_35059-arm64-v8a-release.apk"}
         </script>'''
         helper = ROOT / "scripts/extract_manager_assets.py"
         result = subprocess.run(
-            [sys.executable, str(helper), "https://cnb.cool/shirkneko/sukisu-result/-/releases/tag/manager-ci", "35059"],
+            [sys.executable, str(helper), "https://cnb.cool/sukisu-nova/Release/-/tree/manager-ci", "35059"],
             input=page,
             text=True,
             capture_output=True,
@@ -335,8 +333,8 @@ class SharedIntegrationContractTests(unittest.TestCase):
         )
         self.assertEqual(
             [
-                "SukiSU_Nova_v3.0.0-r1_35059-arm64-v8a-release.apk\thttps://cnb.cool/shirkneko/sukisu-result/-/releases/download/manager-ci/SukiSU_Nova_v3.0.0-r1_35059-arm64-v8a-release.apk",
-                "SukiSU_Nova_v3.0.0-r1_35059-universal-release.apk\thttps://cnb.cool/shirkneko/sukisu-result/-/releases/download/manager-ci/SukiSU_Nova_v3.0.0-r1_35059-universal-release.apk",
+                "SukiSU_Nova_v3.0.0-r1_35059-arm64-v8a-release.apk\thttps://cnb.cool/sukisu-nova/Release/-/git/raw/manager-ci/apks/SukiSU_Nova_v3.0.0-r1_35059-arm64-v8a-release.apk",
+                "SukiSU_Nova_v3.0.0-r1_35059-universal-release.apk\thttps://cnb.cool/sukisu-nova/Release/-/git/raw/manager-ci/apks/SukiSU_Nova_v3.0.0-r1_35059-universal-release.apk",
             ],
             result.stdout.splitlines(),
         )
